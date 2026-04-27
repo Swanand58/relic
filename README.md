@@ -74,7 +74,7 @@ relic --list               # list all subprojects defined in relic.yaml
 relic --stale              # check which graphs are out of date
 relic --refresh            # emit generation prompts for all subprojects
 relic --refresh payments   # emit generation prompt for one subproject
-relic update               # pull latest from GitHub and reinstall
+relic --update             # pull latest from GitHub main and reinstall
 ```
 
 ---

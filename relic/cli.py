@@ -80,30 +80,6 @@ def _validate_names(names: tuple[str, ...], subprojects: dict) -> None:
         raise SystemExit(1)
 
 
-@app.command(name="update")
-def update() -> None:
-    """Pull the latest version of relic from GitHub and reinstall."""
-    console.print("[bold cyan]Updating relic…[/bold cyan]")
-    result = subprocess.run(
-        [
-            "uv", "tool", "install",
-            "--reinstall",
-            "git+https://github.com/Swanand58/relic",
-        ],
-        text=True,
-    )
-    if result.returncode != 0:
-        console.print("[bold red]Update failed.[/bold red] Is uv installed and on PATH?")
-        raise SystemExit(result.returncode)
-    console.print("[bold green]relic updated.[/bold green]")
-
-
-@app.command(name="load", hidden=True)
-def _load_placeholder() -> None:  # pragma: no cover
-    """Internal placeholder — not used directly."""
-    pass
-
-
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -115,11 +91,28 @@ def main(
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
     refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Optionally pass subproject name(s) as arguments to refresh only those."),
     stale: bool = typer.Option(False, "--stale", "-s", help="Check which graphs are stale."),
+    update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
     """Relic — load knowledge graphs into your clipboard for AI coding sessions."""
     if version:
         console.print(f"relic {__version__}")
+        return
+
+    if update:
+        console.print("[bold cyan]Updating relic from main…[/bold cyan]")
+        result = subprocess.run(
+            [
+                "uv", "tool", "install",
+                "--reinstall",
+                "git+https://github.com/Swanand58/relic@main",
+            ],
+            text=True,
+        )
+        if result.returncode != 0:
+            console.print("[bold red]Update failed.[/bold red] Is uv installed and on PATH?")
+            raise SystemExit(result.returncode)
+        console.print("[bold green]relic updated.[/bold green]")
         return
 
     cfg = _load_config()

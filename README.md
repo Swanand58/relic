@@ -211,3 +211,35 @@ relic.yaml
 Graphs stay local to your machine. Your project repo is untouched. This is the recommended setup for shared or work codebases where you want relic context privately, without pushing it upstream.
 
 If you own the repo and want graphs committed (so teammates benefit too), simply omit these lines from `.gitignore` and commit `.knowledge/` alongside code changes.
+
+---
+
+## Security
+
+relic reads your source files and builds prompts from them. These protections are built in:
+
+**Path traversal prevention**
+
+Subproject paths in `relic.yaml` are resolved and checked against the project root (the directory where you run relic). Any path that escapes the project root — e.g. `path: /etc` or `path: ../../secrets` — is rejected with an error before any files are read.
+
+**Symlink blocking**
+
+relic skips all symlinks when walking subproject directories. A symlink inside your codebase pointing outside the project cannot be used to read arbitrary files off your machine.
+
+**CLI argument sanitisation**
+
+Subproject names passed on the command line (e.g. `relic payments`) are validated against `[a-zA-Z0-9_-]` only. Path traversal attempts like `relic ../../etc` are rejected immediately.
+
+**Prompt injection defence**
+
+Every file's content is wrapped in explicit delimiters and the generation prompt instructs the agent to treat all file content as data, not as instructions. This reduces the risk of malicious strings inside your source files hijacking the agent's behaviour during graph generation.
+
+**File collection limits**
+
+relic skips files over 100 KB and caps collection at 500 files per subproject. This prevents runaway prompt sizes from unusually large or deeply nested directories.
+
+**What relic does NOT do**
+
+- It does not send your code anywhere itself — no API calls, no telemetry.
+- The generation prompt goes to stdout only. Your AI agent (Claude Code, Copilot, etc.) reads it locally.
+- `relic update` runs `uv tool install --reinstall` against the hardcoded GitHub URL only — no user-supplied URLs are ever passed to a shell.

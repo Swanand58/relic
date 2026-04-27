@@ -1,5 +1,6 @@
 """Relic CLI — entry point for all commands."""
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,10 @@ console = Console()
 # Paths resolved relative to the working directory where relic is invoked.
 CONFIG_FILE = Path("relic.yaml")
 KNOWLEDGE_DIR = Path(".knowledge")
+PROJECT_ROOT = Path.cwd()
+
+# Subproject names must be simple identifiers — no path traversal via CLI args.
+_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _load_config() -> dict:
@@ -53,7 +58,19 @@ def _load_config() -> dict:
 
 
 def _validate_names(names: tuple[str, ...], subprojects: dict) -> None:
-    """Exit with an error if any name is not defined in relic.yaml."""
+    """Exit with an error if any name is unsafe or not defined in relic.yaml.
+
+    Name validation rejects path traversal attempts passed via CLI args
+    (e.g. `relic ../../etc`).
+    """
+    for n in names:
+        if not _SAFE_NAME_RE.match(n):
+            console.print(
+                f"[bold red]Invalid subproject name:[/bold red] '{n}'\n"
+                "Names must contain only letters, numbers, hyphens, and underscores."
+            )
+            raise SystemExit(1)
+
     unknown = [n for n in names if n not in subprojects]
     if unknown:
         console.print(
@@ -143,9 +160,9 @@ def main(
         if refresh:
             _validate_names(tuple(refresh), all_subprojects)
             for name in refresh:
-                emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR)
+                emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR, PROJECT_ROOT)
         else:
-            emit_refresh_all(all_subprojects, KNOWLEDGE_DIR)
+            emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT)
         return
 
     # positional: relic payments [api ...]

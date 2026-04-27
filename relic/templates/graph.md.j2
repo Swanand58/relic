@@ -1,0 +1,69 @@
+# Knowledge Graph: {{ subproject_name }}
+
+**Generated:** {{ generated_date }}
+**Git Hash:** {{ git_hash }}
+**Path:** {{ subproject_path }}
+
+---
+
+## What is {{ subproject_name }}
+
+{{ summary }}
+
+---
+
+## Entry Points
+
+{% for entry in entry_points %}
+- `{{ entry.file }}` — {{ entry.description }}
+{% endfor %}
+
+---
+
+## Key Entities
+
+| Name | Type | File | Purpose |
+|------|------|------|---------|
+{% for entity in key_entities %}
+| `{{ entity.name }}` | {{ entity.type }} | `{{ entity.file }}` | {{ entity.purpose }} |
+{% endfor %}
+
+---
+
+## API Surface
+
+{% if api_surface %}
+{% for api in api_surface %}
+- **{{ api.method }}** `{{ api.path }}` — {{ api.description }}
+{% endfor %}
+{% else %}
+_No HTTP endpoints exposed. See entry points for invocation._
+{% endif %}
+
+---
+
+## Cross-Project Dependencies
+
+**Calls:**
+{% for dep in calls %}
+- `{{ dep.target }}` — {{ dep.reason }}
+{% endfor %}
+
+**Called by:**
+{% for dep in called_by %}
+- `{{ dep.source }}` — {{ dep.reason }}
+{% endfor %}
+
+---
+
+## Folder Structure
+
+```
+{{ folder_structure }}
+```
+
+---
+
+## Confidence Briefing Anchor
+
+> _Agent: Fill in after reading — "I understand [X]. I am less confident about [Y]. Ready: yes/no."_

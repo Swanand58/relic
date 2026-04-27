@@ -90,7 +90,8 @@ def main(
         metavar="SUBPROJECT...",
     ),
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
-    refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Optionally pass subproject name(s) as arguments to refresh only those."),
+    refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Skips fresh subprojects unless --force is set."),
+    force: bool = typer.Option(False, "--force", "-f", help="Force refresh even if graph.md is not stale."),
     stale: bool = typer.Option(False, "--stale", "-s", help="Check which graphs are stale."),
     init: Optional[str] = typer.Option(None, "--init", "-i", help=f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'.", metavar="AGENT"),
     update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
@@ -164,7 +165,7 @@ def main(
             for name in subprojects_arg:
                 emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR, PROJECT_ROOT)
         else:
-            emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT)
+            emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT, force=force)
         return
 
     # positional: relic payments [api ...]

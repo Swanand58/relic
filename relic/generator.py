@@ -351,23 +351,49 @@ def emit_master_graph_prompt(subprojects: dict, knowledge_dir: Path) -> None:
     )
 
 
-def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path) -> None:
+def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path, force: bool = False) -> None:
     """Emit generation prompts for every subproject then the master graph.
 
-    Continues past per-subproject errors — all valid subprojects are always emitted.
+    Skips subprojects whose graph.md is fresh (exists and newer than latest git commit)
+    unless force=True. Continues past per-subproject errors.
     """
+    from relic.staleness import is_stale  # local import avoids circular dependency
+
     failed = []
+    skipped = []
+    refreshed = []
+
     for name, cfg in subprojects.items():
+        subproject_path = Path(cfg["path"]).resolve()
+
+        if not force:
+            staleness = is_stale(name, subproject_path, knowledge_dir)
+            if not staleness["stale"]:
+                console.print(
+                    f"[dim]— {name}: fresh, skipping ({staleness['reason']})[/dim]",
+                )
+                skipped.append(name)
+                continue
+
         print(f"\n{'=' * 80}")
         print(f"# SUBPROJECT: {name}")
         print(f"{'=' * 80}\n")
         ok = emit_refresh_prompt(name, cfg, knowledge_dir, project_root)
-        if not ok:
+        if ok:
+            refreshed.append(name)
+        else:
             failed.append(name)
 
+    if skipped:
+        console.print(f"[dim]Skipped {len(skipped)} fresh subproject(s): {', '.join(skipped)}[/dim]")
     if failed:
         console.print(
             f"[yellow]Skipped {len(failed)} subproject(s) with errors:[/yellow] {', '.join(failed)}",
         )
 
-    emit_master_graph_prompt(subprojects, knowledge_dir)
+    # Emit master graph if anything was refreshed or master doesn't exist yet.
+    master_path = knowledge_dir / "graph.md"
+    if refreshed or not master_path.exists():
+        emit_master_graph_prompt(subprojects, knowledge_dir)
+    else:
+        console.print("[dim]— master graph: fresh, skipping[/dim]")

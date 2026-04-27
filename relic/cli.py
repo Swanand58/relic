@@ -3,7 +3,7 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional  # noqa: F401 — used for subprojects_arg
 
 import typer
 import yaml
@@ -113,13 +113,7 @@ def main(
         metavar="SUBPROJECT...",
     ),
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
-    refresh: Optional[list[str]] = typer.Option(
-        None,
-        "--refresh",
-        "-r",
-        help="Emit a graph.md generation prompt to stdout for the active coding agent to execute. Pass subproject name(s) or omit for all.",
-        metavar="NAME",
-    ),
+    refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Optionally pass subproject name(s) as arguments to refresh only those."),
     stale: bool = typer.Option(False, "--stale", "-s", help="Check which graphs are stale."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
@@ -155,11 +149,11 @@ def main(
         console.print(table)
         return
 
-    # --refresh [NAME ...]
-    if refresh is not None:
-        if refresh:
-            _validate_names(tuple(refresh), all_subprojects)
-            for name in refresh:
+    # --refresh [NAME ...]  — positional args act as filter when --refresh is set
+    if refresh:
+        if subprojects_arg:
+            _validate_names(tuple(subprojects_arg), all_subprojects)
+            for name in subprojects_arg:
                 emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR, PROJECT_ROOT)
         else:
             emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT)

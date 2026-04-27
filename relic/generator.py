@@ -114,11 +114,16 @@ _(If none, write: No HTTP endpoints exposed.)_
 
 
 def _validate_subproject_path(path: Path, project_root: Path) -> None:
-    """Raise ValueError if path escapes the project root.
+    """Raise ValueError if path escapes the project root or does not exist.
 
     Prevents relic.yaml entries like path: /etc or path: ../../secrets
     from reading arbitrary files off the machine.
     """
+    if not path.exists():
+        raise ValueError(
+            f"Subproject path '{path}' does not exist. "
+            "Check the path in relic.yaml."
+        )
     try:
         path.relative_to(project_root)
     except ValueError:
@@ -226,11 +231,11 @@ def build_refresh_prompt(
     )
 
 
-def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root: Path) -> None:
+def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root: Path) -> bool:
     """Print the generation prompt for one subproject to stdout.
 
     The active coding agent reads this output and writes graph.md.
-    Exits with an error if the subproject path is outside the project root.
+    Returns True on success, False on error (never raises or exits — caller decides).
     """
     out_dir = knowledge_dir / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -238,27 +243,36 @@ def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root:
     try:
         prompt = build_refresh_prompt(name, cfg, knowledge_dir, project_root)
     except ValueError as exc:
-        console.print(f"[bold red]Security error:[/bold red] {exc}", err=True)
-        raise SystemExit(1)
+        console.print(f"[bold red]Error ({name}):[/bold red] {exc}", err=True)
+        return False
 
     # Plain print — agent captures raw stdout cleanly.
     print(prompt)
 
     console.print(
-        Panel(
-            f"[bold cyan]{name}[/bold cyan] prompt emitted.\n"
-            f"Agent: write output to [dim]{out_dir / 'graph.md'}[/dim]",
-            title="[bold]Relic — refresh[/bold]",
-            border_style="cyan",
-        ),
+        f"[green]✓[/green] [bold cyan]{name}[/bold cyan] prompt emitted → "
+        f"[dim]{out_dir / 'graph.md'}[/dim]",
         err=True,
     )
+    return True
 
 
 def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path) -> None:
-    """Emit generation prompts for every subproject, separated by a clear divider."""
+    """Emit generation prompts for every subproject, separated by a clear divider.
+
+    Continues past per-subproject errors — all valid subprojects are always emitted.
+    """
+    failed = []
     for name, cfg in subprojects.items():
         print(f"\n{'=' * 80}")
         print(f"# SUBPROJECT: {name}")
         print(f"{'=' * 80}\n")
-        emit_refresh_prompt(name, cfg, knowledge_dir, project_root)
+        ok = emit_refresh_prompt(name, cfg, knowledge_dir, project_root)
+        if not ok:
+            failed.append(name)
+
+    if failed:
+        console.print(
+            f"[yellow]Skipped {len(failed)} subproject(s) with errors:[/yellow] {', '.join(failed)}",
+            err=True,
+        )

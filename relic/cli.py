@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from relic import __version__
+from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.loader import load_and_copy
 from relic.staleness import check_all_staleness, is_stale
@@ -91,12 +92,26 @@ def main(
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
     refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Optionally pass subproject name(s) as arguments to refresh only those."),
     stale: bool = typer.Option(False, "--stale", "-s", help="Check which graphs are stale."),
+    init: Optional[str] = typer.Option(None, "--init", "-i", help=f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'.", metavar="AGENT"),
     update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
     """Relic — load knowledge graphs into your clipboard for AI coding sessions."""
     if version:
         console.print(f"relic {__version__}")
+        return
+
+    if init is not None:
+        if init == "all":
+            init_all_agents(PROJECT_ROOT)
+        elif init in AGENTS:
+            init_agent(init, PROJECT_ROOT)
+        else:
+            console.print(
+                f"[bold red]Unknown agent:[/bold red] '{init}'\n"
+                f"Choose from: {', '.join(AGENTS)} or 'all'"
+            )
+            raise SystemExit(1)
         return
 
     if update:

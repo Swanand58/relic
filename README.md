@@ -33,7 +33,21 @@ uv tool install --editable .
 
 ## Setup
 
-1. In your project root, create `relic.yaml`:
+### Step 1 — initialise relic for your coding agent
+
+Run this once in your project root. It writes relic's instructions into your agent's config file so the agent automatically handles `relic --refresh` output:
+
+```bash
+relic --init claude     # Claude Code  → writes/updates CLAUDE.md
+relic --init copilot    # GitHub Copilot → writes/updates .github/copilot-instructions.md
+relic --init cursor     # Cursor → writes/updates .cursorrules
+relic --init codex      # OpenAI Codex → writes/updates AGENTS.md
+relic --init all        # writes all of the above
+```
+
+This teaches the agent: "when you see `relic --refresh` output, read it and write the graph.md files to the paths it specifies."
+
+### Step 3 — create `relic.yaml` in your project root
 
 ```yaml
 subprojects:
@@ -48,14 +62,16 @@ subprojects:
     description: "Cloud data pipeline jobs"
 ```
 
-2. Generate knowledge graphs (your active AI agent does the writing):
+### Step 4 — generate knowledge graphs
+
+Your active AI agent does the writing:
 
 ```bash
 relic --refresh payments   # emits a generation prompt → agent writes .knowledge/payments/graph.md
 relic --refresh            # same for all subprojects
 ```
 
-3. Load a graph into your clipboard before starting a session:
+### Step 5 — load a graph before starting a session
 
 ```bash
 relic payments             # copies session prompt to clipboard
@@ -74,6 +90,8 @@ relic --list               # list all subprojects defined in relic.yaml
 relic --stale              # check which graphs are out of date
 relic --refresh            # emit generation prompts for all subprojects
 relic --refresh payments   # emit generation prompt for one subproject
+relic --init claude        # write relic instructions into CLAUDE.md
+relic --init all           # write instructions for all supported agents
 relic --update             # pull latest from GitHub main and reinstall
 ```
 

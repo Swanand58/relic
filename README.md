@@ -35,7 +35,7 @@ uv tool install --editable .
 
 ### Step 1 — initialise relic for your coding agent
 
-Run this once in your project root. It writes relic's instructions into your agent's config file so the agent automatically handles `relic --refresh` output:
+Run this once **in your own terminal** (not inside the agent) from your project root. It writes relic's instructions into your agent's config file so the agent automatically handles `relic --refresh` output:
 
 ```bash
 relic --init claude     # Claude Code  → writes/updates CLAUDE.md

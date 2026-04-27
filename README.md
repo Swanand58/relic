@@ -77,11 +77,12 @@ subprojects:
 Run in **your terminal**. Your active coding agent reads the output and writes the graph files:
 
 ```bash
-relic --refresh            # generate for all subprojects
+relic --refresh            # generate for stale or missing graphs only
 relic --refresh payments   # generate for one subproject only
+relic --refresh --force    # regenerate everything regardless of staleness
 ```
 
-relic prints a structured prompt to stdout. The agent analyses the code and writes `.knowledge/<subproject>/graph.md`.
+relic checks each subproject against the latest git commit. Fresh graphs are skipped automatically. The agent analyses the code dump and writes `.knowledge/<subproject>/graph.md` plus a master `.knowledge/graph.md`.
 
 ### Step 4 — load a graph before starting a new session
 
@@ -99,8 +100,9 @@ Paste into your AI session. The agent starts with full codebase context immediat
 ```bash
 relic <name> [name ...]    # load graph(s) → clipboard
 relic --list               # list all subprojects defined in relic.yaml
-relic --refresh            # emit generation prompts for all subprojects
-relic --refresh <name>     # emit generation prompt for one subproject
+relic --refresh            # emit prompts for stale/missing graphs only
+relic --refresh <name>     # emit prompt for one subproject
+relic --refresh --force    # force regenerate all graphs regardless of staleness
 relic --stale              # check which graphs are out of date
 relic --init <agent>       # write relic instructions into agent config file
 relic --init all           # write instructions for all supported agents

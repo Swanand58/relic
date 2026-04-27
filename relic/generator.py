@@ -259,8 +259,100 @@ def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root:
     return True
 
 
+MASTER_GRAPH_PROMPT = """\
+You have just written individual knowledge graph files for each subproject.
+
+Now write a master knowledge graph to:
+
+    {output_path}
+
+This file is the top-level index for the entire codebase. It must contain:
+
+---
+# Master Knowledge Graph
+
+**Generated:** <today's date, UTC>
+**Subprojects:** {subproject_list}
+
+---
+
+## What is this codebase
+
+<3-5 sentences describing what the overall system does and what problem it solves.>
+
+---
+
+## Subprojects
+
+| Name | Path | Role |
+|------|------|------|
+{subproject_table}
+
+---
+
+## Cross-Project Dependency Map
+
+Describe how the subprojects connect to each other. Which ones call which.
+Use a simple text diagram or bullet list showing the data/call flow across the system.
+
+---
+
+## Key Shared Concepts
+
+List any domain concepts, data models, or patterns that appear across multiple subprojects.
+
+---
+
+## Where to Start
+
+If a developer is new to this codebase, which subproject should they read first and why?
+
+---
+
+Read these already-written subproject graphs to inform your answer:
+
+{graph_paths}
+"""
+
+
+def emit_master_graph_prompt(subprojects: dict, knowledge_dir: Path) -> None:
+    """Emit a prompt asking the agent to write the master .knowledge/graph.md.
+
+    Called after all subproject prompts have been emitted so the agent can
+    reference the individual graph.md files it just wrote.
+    """
+    output_path = (knowledge_dir / "graph.md").resolve()
+    subproject_list = ", ".join(subprojects.keys())
+
+    table_rows = "\n".join(
+        f"| `{name}` | `{cfg['path']}` | {cfg.get('description', '')} |"
+        for name, cfg in subprojects.items()
+    )
+
+    graph_paths = "\n".join(
+        f"- {(knowledge_dir / name / 'graph.md').resolve()}"
+        for name in subprojects
+    )
+
+    prompt = MASTER_GRAPH_PROMPT.format(
+        output_path=output_path,
+        subproject_list=subproject_list,
+        subproject_table=table_rows,
+        graph_paths=graph_paths,
+    )
+
+    print(f"\n{'=' * 80}")
+    print("# MASTER GRAPH")
+    print(f"{'=' * 80}\n")
+    print(prompt)
+
+    console.print(
+        f"[green]✓[/green] [bold]master[/bold] prompt emitted → [dim]{output_path}[/dim]",
+    )
+
+
 def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path) -> None:
-    """Emit generation prompts for every subproject, separated by a clear divider.
+    """Emit generation prompts for every subproject then the master graph.
 
     Continues past per-subproject errors — all valid subprojects are always emitted.
     """
@@ -277,3 +369,5 @@ def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path)
         console.print(
             f"[yellow]Skipped {len(failed)} subproject(s) with errors:[/yellow] {', '.join(failed)}",
         )
+
+    emit_master_graph_prompt(subprojects, knowledge_dir)

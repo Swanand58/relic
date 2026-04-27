@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# uv — lock file IS committed (reproducible installs)
+# uv.lock — do not ignore
+
+# NOTE: .knowledge/ is intentionally NOT ignored.
+# All graph.md files should be committed.

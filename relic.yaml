@@ -1,0 +1,10 @@
+subprojects:
+  payments:
+    path: ./payments
+    description: "Payment processing service"
+  api:
+    path: ./api
+    description: "FastAPI package with endpoints, services and models"
+  pipeline:
+    path: ./pipeline
+    description: "Cloud data pipeline jobs"

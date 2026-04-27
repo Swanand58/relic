@@ -147,7 +147,6 @@ def _collect_files(root: Path, project_root: Path) -> list[tuple[str, str]]:
             console.print(
                 f"[yellow]Warning:[/yellow] file cap ({MAX_FILES}) reached in {root}. "
                 "Remaining files skipped.",
-                err=True,
             )
             break
 
@@ -251,7 +250,6 @@ def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root:
     console.print(
         f"[green]✓[/green] [bold cyan]{name}[/bold cyan] prompt emitted → "
         f"[dim]{out_dir / 'graph.md'}[/dim]",
-        err=True,
     )
     return True
 
@@ -273,5 +271,4 @@ def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path)
     if failed:
         console.print(
             f"[yellow]Skipped {len(failed)} subproject(s) with errors:[/yellow] {', '.join(failed)}",
-            err=True,
         )

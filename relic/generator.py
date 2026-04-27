@@ -99,7 +99,12 @@ _(If none, write: No HTTP endpoints exposed.)_
 
 ## Confidence Briefing Anchor
 
-> _Agent: Fill in after reading — "I understand [X]. I am less confident about [Y]. Ready: yes/no."_
+Fill this in yourself based on your analysis of the code above:
+
+**Confidence score:** <X/10>
+**I understand:** <what you are confident about — key flows, patterns, entry points>
+**Less confident about:** <gaps, unclear logic, missing context>
+**Ready to work:** <yes / yes with caveats / no>
 ---
 
 ## Subproject description

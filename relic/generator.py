@@ -14,9 +14,8 @@ Security model
 from pathlib import Path
 
 from rich.console import Console
-from rich.panel import Panel
 
-console = Console()
+console = Console(stderr=True)  # all status output goes to stderr; stdout is for the agent prompt
 
 MAX_FILE_BYTES = 100_000
 MAX_FILES = 500  # hard cap — avoids absurdly large prompts
@@ -243,7 +242,7 @@ def emit_refresh_prompt(name: str, cfg: dict, knowledge_dir: Path, project_root:
     try:
         prompt = build_refresh_prompt(name, cfg, knowledge_dir, project_root)
     except ValueError as exc:
-        console.print(f"[bold red]Error ({name}):[/bold red] {exc}", err=True)
+        console.print(f"[bold red]Error ({name}):[/bold red] {exc}")
         return False
 
     # Plain print — agent captures raw stdout cleanly.

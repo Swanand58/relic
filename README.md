@@ -79,7 +79,7 @@ relic update               # pull latest from GitHub and reinstall
 
 ---
 
-## Example: nedd-backend (payment app)
+## Example: backend (payment app)
 
 Say your project looks like this:
 
@@ -117,7 +117,7 @@ relic --refresh
 relic prints a structured prompt for each subproject. Your agent reads it, analyses the code, and writes:
 
 ```
-nedd-backend/
+backend/
 └── .knowledge/
     ├── payments/graph.md
     ├── auth/graph.md

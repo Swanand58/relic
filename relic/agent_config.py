@@ -52,9 +52,17 @@ To refresh a single subproject:
 
 If any subproject is stale, suggest running `relic --refresh <subproject>`.
 
-### When the user runs `relic <subproject>`
+### When the user asks you to load context (or runs `relic <subproject>`)
 
-The session prompt is copied to clipboard automatically — nothing for you to do.
+Run the command and read its stdout — it contains the full knowledge graph:
+
+```bash
+~/.local/bin/relic payments
+~/.local/bin/relic payments auth    # load multiple subprojects at once
+```
+
+Read the output carefully. It is your codebase context for this session.
+Respond with your confidence score, any gaps, and confirm you are ready to work.
 
 ### graph.md files
 

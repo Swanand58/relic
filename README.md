@@ -1,8 +1,45 @@
 # relic
 
-CLI tool that stores and loads codebase knowledge graphs per subproject — so your AI coding agent starts every session with full context, not a cold read.
+CLI tool that builds a static knowledge graph from your codebase and automatically injects precise, token-efficient context into your AI coding agent before every file read or edit — no manual commands, no cold reads, no hallucinations.
 
 Works with any AI coding agent: Claude Code, GitHub Copilot, OpenAI Codex, Cursor, etc.
+
+---
+
+## How it works
+
+```
+relic index                    # scan codebase → .knowledge/index.pkl  (seconds, no LLM)
+relic --init claude            # write CLAUDE.md + PreToolUse hook
+```
+
+From that point, every time your agent reads or edits a file, the hook fires automatically:
+
+```
+relic query src/payments/processor.py
+```
+
+The agent receives a TOON context block before touching the file:
+
+```
+focus: src/payments/processor.py
+
+files[3]{path,language,subproject}:
+  src/payments/processor.py,python,payments
+  src/payments/models.py,python,payments
+  src/core/database.py,python,core
+
+symbols[5]{name,type,file,line}:
+  PaymentProcessor,class,src/payments/processor.py,12
+  process_charge,function,src/payments/processor.py,34
+  handle_refund,function,src/payments/processor.py,67
+
+imports[2]{from,to}:
+  src/payments/processor.py,src/payments/models.py
+  src/payments/processor.py,src/core/database.py
+```
+
+300–800 tokens per query. No LLM needed to build the index. No cold reads. No hallucinated imports.
 
 ---
 
@@ -10,13 +47,11 @@ Works with any AI coding agent: Claude Code, GitHub Copilot, OpenAI Codex, Curso
 
 Requires [uv](https://docs.astral.sh/uv/).
 
-### From GitHub (any machine, no PyPI needed)
-
 ```bash
 uv tool install git+https://github.com/Swanand58/relic
 ```
 
-If `relic` is not found after install, run:
+If `relic` is not found after install:
 
 ```bash
 uv tool update-shell
@@ -24,16 +59,15 @@ uv tool update-shell
 
 Then open a new terminal tab.
 
-### Upgrade to latest (main branch)
+### Upgrade to latest
 
 ```bash
 relic --update
 ```
 
-### Local dev install (editable — picks up changes live)
+### Local dev install
 
 ```bash
-# from inside the cloned repo
 uv tool install --editable .
 ```
 
@@ -41,237 +75,207 @@ uv tool install --editable .
 
 ## Setup
 
-All setup commands run **in your own terminal** — not inside the coding agent.
+Run all setup commands **in your own terminal** — not inside the coding agent.
 
-### Step 1 — initialise relic for your coding agent
-
-Run once from your project root. Writes relic's instructions into your agent's config file so it automatically handles `relic --refresh` output:
+### Step 1 — auto-discover subprojects
 
 ```bash
-relic --init claude     # Claude Code   → writes/updates CLAUDE.md
-relic --init copilot    # GitHub Copilot → writes/updates .github/copilot-instructions.md
-relic --init cursor     # Cursor        → writes/updates .cursorrules
-relic --init codex      # OpenAI Codex  → writes/updates AGENTS.md
-relic --init all        # writes all of the above
-```
-
-Re-running `--init` is safe — it updates the existing block without duplicating it.
-
-### Step 2 — auto-generate `relic.yaml`
-
-```bash
+cd your-project
 relic init
 ```
 
-Walks your project, detects subprojects from package manifests and source directories, writes `relic.yaml`, and adds `relic.yaml` + `.knowledge/` to `.gitignore` automatically.
+Walks the project, detects subprojects from package manifests and source directories, writes `relic.yaml`, and adds `relic.yaml` and `.knowledge/` to `.gitignore`. Takes a second.
 
 `relic.yaml` is personal config — gitignored by design. Each developer runs `relic init` on their own machine.
 
-### Step 3 — generate knowledge graphs
-
-Run in **your terminal**. Your active coding agent reads the output and writes the graph files:
+### Step 2 — build the knowledge graph
 
 ```bash
-relic --refresh            # generate for stale or missing graphs only
-relic --refresh payments   # generate for one subproject only
-relic --refresh --force    # regenerate everything regardless of staleness
+relic index
 ```
 
-relic checks each subproject against the latest git commit. Fresh graphs are skipped automatically. The agent analyses the code dump and writes `.knowledge/<subproject>/graph.md` plus a master `.knowledge/graph.md`.
+Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance relationships. Writes `.knowledge/index.pkl`.
 
-### Step 4 — load a graph before starting a new session
+Run this again after significant codebase changes.
+
+### Step 3 — wire up your coding agent
 
 ```bash
-relic payments             # copies session prompt to clipboard
-relic payments api         # load multiple subprojects into one prompt
+relic --init claude     # Claude Code   → CLAUDE.md + .claude/settings.json hook
+relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md
+relic --init cursor     # Cursor        → .cursorrules
+relic --init codex      # OpenAI Codex  → AGENTS.md
+relic --init all        # all of the above
 ```
 
-Paste into your AI session. The agent starts with full codebase context immediately.
+For Claude Code, this also installs a **PreToolUse hook** into `.claude/settings.json`. The hook runs `relic query <file>` automatically before every Read or Edit — no manual commands needed.
+
+Re-running `--init` is safe — it updates the existing block without duplicating it.
 
 ---
 
-## Usage
+## That's it — start coding
+
+With the hook active, your agent automatically gets context before touching any file. No paste, no prompt, no warm-up.
+
+To query context manually (or for non-hook agents):
 
 ```bash
-relic init                 # auto-discover subprojects, generate relic.yaml, update .gitignore
-relic <name> [name ...]    # load graph(s) → clipboard
-relic --list               # list all subprojects defined in relic.yaml
-relic --refresh            # emit prompts for stale/missing graphs only
-relic --refresh <name>     # emit prompt for one subproject
-relic --refresh --force    # force regenerate all graphs regardless of staleness
-relic --stale              # check which graphs are out of date
-relic --init <agent>       # write relic instructions into agent config file
-relic --init all           # write instructions for all supported agents
-relic --update             # pull latest from GitHub main and reinstall
-relic --version            # print installed version
+relic query src/payments/processor.py
+relic query PaymentProcessor            # by symbol name
+relic query src/payments/processor.py --depth 3   # wider neighbourhood
+```
+
+---
+
+## Full command reference
+
+```bash
+relic init                     # auto-discover subprojects, write relic.yaml, update .gitignore
+relic index                    # build knowledge graph from source (no LLM)
+relic query <file|symbol>      # print TOON context subgraph to stdout
+relic query <file> --depth N   # adjust BFS traversal depth (default 2)
+
+relic --list                   # list subprojects defined in relic.yaml
+relic --stale                  # check which graph.md docs are out of date
+relic --refresh                # emit prompts for stale/missing graph.md docs only
+relic --refresh <name>         # emit prompt for one subproject
+relic --refresh --force        # force regenerate all graph.md docs
+
+relic --init <agent>           # write relic instructions into agent config file
+relic --init all               # write instructions for all supported agents
+relic --update                 # pull latest from GitHub main and reinstall
+relic --version                # print installed version
 ```
 
 ---
 
 ## Example: backend (payment app)
 
-Say your project looks like this:
-
 ```
 backend/
 ├── payments/       # Stripe integration, charge logic
 ├── auth/           # JWT, user sessions
-├── notifications/  # Email + push after payment events
-└── ...
+└── notifications/  # Email + push after payment events
 ```
 
-**Step 1 — run setup in your terminal**
+**Setup (once per machine):**
 
 ```bash
 cd backend
-relic --init claude   # writes CLAUDE.md
+relic init              # discovers payments, auth, notifications → relic.yaml
+relic index             # builds graph in ~2 seconds
+relic --init claude     # wires CLAUDE.md + hook
 ```
 
-**Step 2 — create `relic.yaml`**
+**Start a new session — zero manual context loading:**
 
-```yaml
-subprojects:
-  payments:
-    path: ./payments
-    description: "Stripe payment processing — charges, refunds, webhook handling"
-  auth:
-    path: ./auth
-    description: "JWT auth, user sessions, role-based access control"
-  notifications:
-    path: ./notifications
-    description: "Email and push notification triggers after payment events"
-```
+Open Claude Code. The hook fires before the first Read. Agent immediately knows:
 
-**Step 3 — generate knowledge graphs**
+- `PaymentProcessor` is in `payments/processor.py:12`
+- It imports `ChargeModel` from `payments/models.py`
+- `notifications/sender.py` imports `PaymentProcessor`
+- None of this required reading or summarising any file
 
-Run in your terminal:
+**Working on a cross-subproject bug:**
 
 ```bash
-relic --refresh
+relic query payments/processor.py --depth 3
 ```
 
-relic prints a prompt for each subproject. Your agent reads it and writes:
+Prints a wider TOON subgraph. Pipe it into the agent or paste it directly.
 
-```
-backend/
-└── .knowledge/
-    ├── payments/graph.md
-    ├── auth/graph.md
-    └── notifications/graph.md
-```
-
-**Step 4 — start a new session on the payments bug**
+**After a big refactor — rebuild the graph:**
 
 ```bash
-relic payments
+relic index
 ```
 
-Prompt copied to clipboard. Paste into your AI session. The agent immediately knows:
-- What Stripe webhooks exist and where they're handled
-- Which functions process refunds
-- What `payments` calls in `notifications` after a charge succeeds
+Done in seconds. No LLM needed.
 
-**Step 5 — working across two subprojects at once**
+---
+
+## Graph.md knowledge docs (optional)
+
+For agents and workflows that prefer rich markdown documentation alongside the static graph, relic can generate LLM-written `graph.md` files per subproject.
+
+Run in your terminal — your active agent reads the output and writes the files:
 
 ```bash
-relic payments notifications
+relic --refresh            # generate for stale or missing docs only
+relic --refresh payments   # generate for one subproject
+relic --refresh --force    # regenerate everything
 ```
 
-Both graphs merged into one prompt. Agent understands the full flow end-to-end.
+Your agent writes:
 
-**Step 6 — check if graphs are stale after a sprint**
+```
+.knowledge/
+├── payments/graph.md
+├── auth/graph.md
+├── notifications/graph.md
+└── graph.md              # master index
+```
+
+Each `graph.md` contains: subproject summary, entry points, key entities, API surface, cross-project dependencies, folder structure, and a confidence self-assessment.
+
+Check staleness:
 
 ```bash
 relic --stale
 ```
 
 ```
-┌──────────────────┬───────┬─────────────────────────────────┐
-│ payments         │  yes  │ Commit 2024-01-15 newer...      │
-│ auth             │  no   │ Graph is up to date             │
-│ notifications    │  yes  │ graph.md does not exist         │
-└──────────────────┴───────┴─────────────────────────────────┘
-```
-
-Refresh only what's stale:
-
-```bash
-relic --refresh payments notifications
+┌───────────────┬───────┬──────────────────────────────────┐
+│ payments      │  yes  │ Commit 2024-01-15 newer than doc │
+│ auth          │  no   │ Graph is up to date              │
+│ notifications │  yes  │ graph.md does not exist          │
+└───────────────┴───────┴──────────────────────────────────┘
 ```
 
 ---
 
-## How it works
+## Token efficiency
 
-**Generating graphs (`--refresh`):**
+| Approach | Tokens per context load |
+|---|---|
+| Full graph.md paste | ~35,000 |
+| `relic query` (TOON, depth=2) | 300–800 |
+| `relic query` (depth=3) | 800–2,000 |
 
-`relic --refresh payments` walks `./payments`, collects all source files, and prints a structured prompt to stdout. Your active AI coding agent reads this prompt, analyses the code, and writes `.knowledge/payments/graph.md`. No separate LLM API key needed — relic delegates to the agent you are already using.
-
-**Loading graphs:**
-
-`relic payments` reads `.knowledge/payments/graph.md`, wraps it in a session opener prompt, and copies it to your clipboard. Paste into any new AI session for instant full-project context.
-
----
-
-## Knowledge graph sections
-
-Each `graph.md` contains:
-
-- **What is [subproject]** — 2-3 line summary
-- **Entry Points** — files where execution starts
-- **Key Entities** — table of important classes, functions, configs
-- **API Surface** — endpoints or triggers exposed
-- **Cross-Project Dependencies** — what it calls and what calls it
-- **Folder Structure** — annotated directory tree
-- **Confidence Briefing Anchor** — agent fills in after reading
+The static graph never makes LLM calls. Build it once, query it thousands of times.
 
 ---
 
-## Staleness detection
+## What gets indexed
 
-`relic --stale` uses git to compare the last commit time for each subproject path against the `graph.md` modification time. If new commits exist since the last refresh, the graph is marked stale.
+| Language | Files | Symbols | Imports |
+|---|---|---|---|
+| Python | ✓ | classes, functions | ✓ (ast) |
+| TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ |
+| JavaScript / JSX | ✓ | classes, functions | ✓ |
+| Other | ✓ (file nodes only) | — | — |
 
 ---
 
-## Keeping graphs out of your project repo
+## Keeping graphs out of your repo
 
-relic reads `relic.yaml` and writes `.knowledge/` in whichever directory you run it from. To keep these local only (recommended for work/shared codebases), add to that project's `.gitignore`:
+`relic init` automatically adds `relic.yaml` and `.knowledge/` to the project's `.gitignore`. These are local to each developer's machine.
 
-```
-.knowledge/
-relic.yaml
-```
-
-If you own the repo and want teammates to share graphs, omit these lines and commit `.knowledge/` alongside code changes.
+If you want teammates to share the same index, remove those lines from `.gitignore` and commit `.knowledge/` alongside code changes.
 
 ---
 
 ## Security
 
-relic reads your source files and builds prompts from them. These protections are built in:
+**Path traversal prevention** — subproject paths in `relic.yaml` are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected before any files are read.
 
-**Path traversal prevention**
+**Symlink blocking** — relic skips all symlinks when walking directories, preventing escape outside the subproject.
 
-Subproject paths in `relic.yaml` are resolved and checked against the project root. Any path that escapes — e.g. `path: /etc` or `path: ../../secrets` — is rejected before any files are read.
+**CLI argument sanitisation** — subproject names are validated against `[a-zA-Z0-9_-]` only. Attempts like `relic ../../etc` are rejected immediately.
 
-**Symlink blocking**
+**Prompt injection defence** — file content in `--refresh` prompts is wrapped in explicit delimiters and the agent is instructed to treat it as data, not instructions.
 
-relic skips all symlinks when walking subproject directories, preventing escape to arbitrary paths on your machine.
+**File size limits** — relic skips files over 200 KB (indexer) / 100 KB (refresh prompts) and caps at 500 files per subproject.
 
-**CLI argument sanitisation**
-
-Subproject names passed on the command line are validated against `[a-zA-Z0-9_-]` only. Path traversal attempts like `relic ../../etc` are rejected immediately.
-
-**Prompt injection defence**
-
-Every file's content is wrapped in explicit delimiters and the generation prompt instructs the agent to treat file content as data, not as instructions. This reduces the risk of malicious strings in source files hijacking agent behaviour.
-
-**File collection limits**
-
-relic skips files over 100 KB and caps collection at 500 files per subproject, preventing runaway prompt sizes.
-
-**What relic does NOT do**
-
-- No API calls, no telemetry — code never leaves your machine.
-- Generation prompt goes to stdout only — your local agent reads it.
-- `relic --update` passes only the hardcoded `github.com/Swanand58/relic@main` URL to uv — no user input is ever passed to a shell.
+**No external calls** — no API calls, no telemetry, no network access. Code never leaves your machine. The `--update` command passes only the hardcoded `github.com/Swanand58/relic@main` URL to uv — no user input reaches the shell.

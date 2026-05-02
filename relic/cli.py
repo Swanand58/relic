@@ -3,7 +3,7 @@
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional  # noqa: F401 — used for subprojects_arg
+from typing import Optional
 
 import typer
 import yaml
@@ -16,7 +16,6 @@ from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.discovery import discover_subprojects
 from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.indexer import load_graph, run_index
-from relic.loader import load_and_copy
 from relic.mcp_server import run as run_mcp
 from relic.staleness import check_all_staleness, is_stale
 from relic.toon import full_index_to_toon, subgraph_to_toon
@@ -356,12 +355,6 @@ def main(
                 emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR, PROJECT_ROOT)
         else:
             emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT, force=force)
-        return
-
-    # positional: relic payments [api ...]
-    if subprojects_arg:
-        _validate_names(tuple(subprojects_arg), all_subprojects)
-        load_and_copy(list(subprojects_arg), KNOWLEDGE_DIR)
         return
 
     # no args — typer prints help automatically via no_args_is_help=True

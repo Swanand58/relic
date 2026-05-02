@@ -12,6 +12,7 @@ from rich.table import Table
 
 from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
+from relic.discovery import discover_subprojects
 from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.loader import load_and_copy
 from relic.staleness import check_all_staleness, is_stale
@@ -79,6 +80,61 @@ def _validate_names(names: tuple[str, ...], subprojects: dict) -> None:
             f"Defined: {', '.join(subprojects.keys())}"
         )
         raise SystemExit(1)
+
+
+def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
+    """Append entries to .gitignore if not already present."""
+    gitignore = project_root / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    additions = [e for e in entries if e not in existing]
+    if additions:
+        block = "\n# relic\n" + "\n".join(additions) + "\n"
+        with gitignore.open("a", encoding="utf-8") as f:
+            f.write(block)
+        console.print(f"[dim]Added to .gitignore: {', '.join(additions)}[/dim]")
+
+
+@app.command(name="init")
+def project_init() -> None:
+    """Auto-discover subprojects and generate relic.yaml. Adds relic entries to .gitignore."""
+    if CONFIG_FILE.exists():
+        console.print(
+            f"[yellow]relic.yaml already exists.[/yellow] Delete it first to re-initialise."
+        )
+        raise SystemExit(1)
+
+    console.print("[bold cyan]Discovering subprojects…[/bold cyan]")
+    subprojects = discover_subprojects(PROJECT_ROOT)
+
+    if not subprojects:
+        console.print(
+            "[bold red]No subprojects found.[/bold red] "
+            "Create relic.yaml manually and define your subprojects."
+        )
+        raise SystemExit(1)
+
+    # Write relic.yaml
+    config = {"subprojects": subprojects}
+    with CONFIG_FILE.open("w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    # Show what was found
+    table = Table(title="Discovered Subprojects", show_lines=True)
+    table.add_column("Name", style="bold cyan")
+    table.add_column("Path")
+    table.add_column("Description")
+    for name, info in subprojects.items():
+        table.add_row(name, info["path"], info["description"])
+    console.print(table)
+
+    # Gitignore relic artifacts — relic.yaml is personal config, not project config
+    _add_to_gitignore(PROJECT_ROOT, ["relic.yaml", ".knowledge/"])
+
+    console.print(f"\n[green]✓[/green] [bold]relic.yaml[/bold] created with {len(subprojects)} subproject(s).")
+    console.print("[dim]relic.yaml and .knowledge/ added to .gitignore — these are local to your machine.[/dim]")
+    console.print("\nNext steps:")
+    console.print("  [cyan]relic --init claude[/cyan]   — set up Claude Code integration")
+    console.print("  [cyan]relic --refresh[/cyan]        — generate knowledge graphs")
 
 
 @app.callback(invoke_without_command=True)

@@ -57,20 +57,15 @@ relic --init all        # writes all of the above
 
 Re-running `--init` is safe — it updates the existing block without duplicating it.
 
-### Step 2 — create `relic.yaml` in your project root
+### Step 2 — auto-generate `relic.yaml`
 
-```yaml
-subprojects:
-  payments:
-    path: ./payments
-    description: "Payment processing service"
-  api:
-    path: ./api
-    description: "FastAPI package with endpoints, services and models"
-  pipeline:
-    path: ./pipeline
-    description: "Cloud data pipeline jobs"
+```bash
+relic init
 ```
+
+Walks your project, detects subprojects from package manifests and source directories, writes `relic.yaml`, and adds `relic.yaml` + `.knowledge/` to `.gitignore` automatically.
+
+`relic.yaml` is personal config — gitignored by design. Each developer runs `relic init` on their own machine.
 
 ### Step 3 — generate knowledge graphs
 
@@ -98,6 +93,7 @@ Paste into your AI session. The agent starts with full codebase context immediat
 ## Usage
 
 ```bash
+relic init                 # auto-discover subprojects, generate relic.yaml, update .gitignore
 relic <name> [name ...]    # load graph(s) → clipboard
 relic --list               # list all subprojects defined in relic.yaml
 relic --refresh            # emit prompts for stale/missing graphs only

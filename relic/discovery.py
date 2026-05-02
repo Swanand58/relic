@@ -154,12 +154,10 @@ def discover_subprojects(project_root: Path) -> dict[str, dict]:
                 "description": _infer_description(child, child.name),
             }
 
-    if found:
-        return found
-
-    # Strategy 3 — well-known source dir names
+    # Strategy 3 — well-known source dir names (always runs alongside Strategy 2)
+    # A project may have both a demo/ with a manifest and a src/ with real source.
     for child in direct_children:
-        if child.name in SOURCE_DIRS and _has_source_files(child):
+        if child.name in SOURCE_DIRS and _has_source_files(child) and child.name not in found:
             rel = f"./{child.relative_to(project_root)}"
             found[child.name] = {
                 "path": rel,

@@ -305,6 +305,10 @@ def main(
         console.print("[bold green]relic updated.[/bold green]")
         return
 
+    # Subcommands (init, index, query) handle their own config loading.
+    if ctx.invoked_subcommand is not None:
+        return
+
     cfg = _load_config()
     all_subprojects: dict = cfg["subprojects"]
 

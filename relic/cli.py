@@ -14,6 +14,7 @@ from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.discovery import discover_subprojects
 from relic.generator import emit_refresh_all, emit_refresh_prompt
+from relic.indexer import load_graph, run_index
 from relic.loader import load_and_copy
 from relic.staleness import check_all_staleness, is_stale
 
@@ -134,7 +135,43 @@ def project_init() -> None:
     console.print("[dim]relic.yaml and .knowledge/ added to .gitignore — these are local to your machine.[/dim]")
     console.print("\nNext steps:")
     console.print("  [cyan]relic --init claude[/cyan]   — set up Claude Code integration")
-    console.print("  [cyan]relic --refresh[/cyan]        — generate knowledge graphs")
+    console.print("  [cyan]relic index[/cyan]            — build knowledge graph from source")
+
+
+@app.command(name="index")
+def index_cmd() -> None:
+    """Build the knowledge graph by statically analysing all subproject source files.
+
+    No LLM involved. Writes .knowledge/index.pkl (NetworkX graph).
+    Run this after relic init, and again whenever the codebase changes significantly.
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold cyan]Indexing codebase…[/bold cyan]"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task("", total=None)
+            G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, CONFIG_FILE)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise SystemExit(1)
+
+    file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
+    symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
+    edge_count = G.number_of_edges()
+
+    table = Table(title="Index Summary", show_lines=True)
+    table.add_column("Metric")
+    table.add_column("Count", justify="right", style="cyan")
+    table.add_row("Files indexed", str(file_count))
+    table.add_row("Symbols extracted", str(symbol_count))
+    table.add_row("Edges (imports/defines/extends)", str(edge_count))
+    console.print(table)
+    console.print(f"\n[green]✓[/green] Index saved to [dim]{KNOWLEDGE_DIR / 'index.pkl'}[/dim]")
 
 
 @app.callback(invoke_without_command=True)

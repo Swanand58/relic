@@ -15,6 +15,8 @@ from pathlib import Path
 
 from rich.console import Console
 
+from relic.staleness import is_stale
+
 console = Console(stderr=True)  # all status output goes to stderr; stdout is for the agent prompt
 
 MAX_FILE_BYTES = 100_000
@@ -357,8 +359,6 @@ def emit_refresh_all(subprojects: dict, knowledge_dir: Path, project_root: Path,
     Skips subprojects whose graph.md is fresh (exists and newer than latest git commit)
     unless force=True. Continues past per-subproject errors.
     """
-    from relic.staleness import is_stale  # local import avoids circular dependency
-
     failed = []
     skipped = []
     refreshed = []

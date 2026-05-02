@@ -8,6 +8,7 @@ from typing import Optional  # noqa: F401 — used for subprojects_arg
 import typer
 import yaml
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from relic import __version__
@@ -17,6 +18,7 @@ from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.indexer import load_graph, run_index
 from relic.loader import load_and_copy
 from relic.staleness import check_all_staleness, is_stale
+from relic.toon import full_index_to_toon, subgraph_to_toon
 
 app = typer.Typer(
     name="relic",
@@ -25,6 +27,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+err_console = Console(stderr=True)
 
 # Paths resolved relative to the working directory where relic is invoked.
 CONFIG_FILE = Path("relic.yaml")
@@ -145,8 +148,6 @@ def index_cmd() -> None:
     No LLM involved. Writes .knowledge/index.pkl (NetworkX graph).
     Run this after relic init, and again whenever the codebase changes significantly.
     """
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-
     try:
         with Progress(
             SpinnerColumn(),
@@ -172,6 +173,86 @@ def index_cmd() -> None:
     table.add_row("Edges (imports/defines/extends)", str(edge_count))
     console.print(table)
     console.print(f"\n[green]✓[/green] Index saved to [dim]{KNOWLEDGE_DIR / 'index.pkl'}[/dim]")
+
+    # Also write full TOON index for human inspection
+    toon_path = KNOWLEDGE_DIR / "index.toon"
+    toon_path.write_text(full_index_to_toon(G), encoding="utf-8")
+    console.print(f"[green]✓[/green] TOON index saved to [dim]{toon_path}[/dim]")
+
+
+@app.command(name="query")
+def query_cmd(
+    target: str = typer.Argument(..., help="File path or symbol name to query.", metavar="FILE_OR_SYMBOL"),
+    depth: int = typer.Option(2, "--depth", "-d", help="Graph traversal depth (hops)."),
+) -> None:
+    """Query the knowledge graph for a file or symbol and print a TOON context subgraph.
+
+    Coding agents run this before editing a file to get precise, token-efficient context.
+    Output goes to stdout — agents read it directly from the bash tool result.
+    """
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise SystemExit(1)
+
+    # Normalise path — strip leading ./ so it matches node IDs
+    target_norm = target.lstrip("./")
+    # Also try matching as-is and with project-relative prefix
+    node_id = None
+    for candidate in [target, target_norm, str(Path(target))]:
+        if candidate in G.nodes:
+            node_id = candidate
+            break
+
+    # If not found as file, try as symbol name
+    if node_id is None:
+        for n, d in G.nodes(data=True):
+            if d.get("ntype") == "symbol" and d.get("name") == target:
+                node_id = n
+                break
+
+    if node_id is None:
+        console.print(f"[bold red]Not found:[/bold red] '{target}' not in index. Run `relic index` first.")
+        raise SystemExit(1)
+
+    # BFS traversal up to `depth` hops (both directions)
+    neighbours = {node_id}
+    frontier = {node_id}
+    for _ in range(depth):
+        next_frontier = set()
+        for n in frontier:
+            next_frontier.update(G.predecessors(n))
+            next_frontier.update(G.successors(n))
+        next_frontier -= neighbours
+        neighbours.update(next_frontier)
+        frontier = next_frontier
+
+    subgraph = G.subgraph(neighbours)
+
+    # Collect typed lists
+    file_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "file"]
+    symbol_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "symbol"]
+    import_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "imports"]
+    define_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "defines"]
+    extends_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "extends"]
+
+    toon = subgraph_to_toon(
+        focus_path=node_id,
+        file_nodes=file_nodes,
+        symbol_nodes=symbol_nodes,
+        import_edges=import_edges,
+        define_edges=define_edges,
+        extends_edges=extends_edges,
+    )
+
+    # Stdout — agent reads this directly
+    print(toon)
+
+    # Status — goes to stderr so it doesn't pollute stdout
+    err_console.print(
+        f"[dim]query: {node_id} | {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}[/dim]"
+    )
 
 
 @app.callback(invoke_without_command=True)

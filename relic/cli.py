@@ -17,6 +17,7 @@ from relic.discovery import discover_subprojects
 from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.indexer import load_graph, run_index
 from relic.loader import load_and_copy
+from relic.mcp_server import run as run_mcp
 from relic.staleness import check_all_staleness, is_stale
 from relic.toon import full_index_to_toon, subgraph_to_toon
 
@@ -254,6 +255,18 @@ def query_cmd(
     err_console.print(
         f"[dim]query: {node_id} | {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}[/dim]"
     )
+
+
+@app.command(name="mcp")
+def mcp_cmd() -> None:
+    """Start the relic MCP server (stdio transport).
+
+    Exposes relic_query as a native tool so agents call it directly
+    instead of running a shell command. Configure in .claude/settings.json:
+
+        "mcpServers": { "relic": { "command": "relic", "args": ["mcp"] } }
+    """
+    run_mcp()
 
 
 @app.callback(invoke_without_command=True)

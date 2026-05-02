@@ -94,16 +94,17 @@ These files are local to your machine and gitignored.
 """
 
 # Shell command injected into .claude/settings.json as a PreToolUse hook.
-# Receives tool call JSON on stdin, extracts file_path, runs relic query.
-# Silently no-ops if relic is not installed or file is not in the index.
+# Receives tool call JSON on stdin. Must output {"hookSpecificOutput":{"additionalContext":"..."}}
+# so Claude Code injects the TOON block before the tool result. Silently no-ops on any error.
 _HOOK_COMMAND = (
-    "input=$(cat); "
-    "file=$(echo \"$input\" | python3 -c \""
-    "import json,sys; "
-    "d=json.load(sys.stdin); "
-    "print(d.get('file_path','') or d.get('path',''))"
-    "\" 2>/dev/null); "
-    "[ -n \"$file\" ] && ~/.local/bin/relic query \"$file\" 2>/dev/null || true"
+    "python3 -c \""
+    "import json,sys,subprocess,pathlib;"
+    "d=json.loads(sys.stdin.read());"
+    "f=d.get('file_path') or d.get('path','');"
+    "r=subprocess.run([str(pathlib.Path.home()/'.local/bin/relic'),'query',f],capture_output=True,text=True) if f else None;"
+    "c=r.stdout if r and r.returncode==0 and r.stdout.strip() else '';"
+    "print(json.dumps({'hookSpecificOutput':{'additionalContext':c}})) if c else None"
+    "\""
 )
 
 

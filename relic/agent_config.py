@@ -28,11 +28,16 @@ code and serves precise, token-efficient context to coding agents.
 The relic binary lives at `~/.local/bin/relic`. If `relic` is not found in your
 shell PATH, use the full path: `~/.local/bin/relic`.
 
-### Automatic context injection (Claude Code only)
+### Automatic context injection (Claude Code)
 
-A PreToolUse hook is active. Before every Read or Edit tool call, relic
-automatically queries the knowledge graph for the target file and injects a
-TOON context block into your context. You will see output like:
+Two mechanisms are active:
+
+1. **PreToolUse hook** — fires before every Read/Edit, runs `relic query <file>`,
+   injects TOON context automatically. No manual call needed.
+2. **MCP tool** — `relic_query` is available as a native tool. Call it directly
+   for any file or symbol to get precise dependency context on demand.
+
+You will see TOON context like:
 
 ```
 focus: src/payments/processor.py
@@ -176,6 +181,13 @@ def _write_claude_hooks(project_root: Path) -> str:
         ],
     })
 
+    # MCP server registration
+    mcp_servers = settings.setdefault("mcpServers", {})
+    mcp_servers["relic"] = {
+        "command": "relic",
+        "args": ["mcp"],
+    }
+
     settings_path.write_text(
         json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -215,13 +227,13 @@ def init_agent(agent_key: str, project_root: Path) -> None:
 
     if agent_key == "claude":
         hook_action = _write_claude_hooks(project_root)
+        settings_path = project_root / ".claude" / "settings.json"
         console.print(
-            f"[green]✓[/green] [bold]Claude Code hook[/bold] — {hook_action} "
-            f"[dim]{project_root / '.claude' / 'settings.json'}[/dim]"
+            f"[green]✓[/green] [bold]Claude Code hook + MCP[/bold] — {hook_action} "
+            f"[dim]{settings_path}[/dim]"
         )
-        console.print(
-            "[dim]PreToolUse hook active: relic query runs automatically before every Read/Edit.[/dim]"
-        )
+        console.print("[dim]PreToolUse hook: relic query fires before every Read/Edit.[/dim]")
+        console.print("[dim]MCP server: relic_query tool available as native agent tool.[/dim]")
 
 
 def init_all_agents(project_root: Path) -> None:

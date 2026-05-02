@@ -25,6 +25,7 @@ app = typer.Typer(
     help="Codebase knowledge management — load and refresh graph.md knowledge files.",
     add_completion=False,
     no_args_is_help=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -258,11 +259,6 @@ def query_cmd(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    subprojects_arg: Optional[list[str]] = typer.Argument(
-        None,
-        help="One or more subproject names to load into a session prompt.",
-        metavar="SUBPROJECT...",
-    ),
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
     refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Skips fresh subprojects unless --force is set."),
     force: bool = typer.Option(False, "--force", "-f", help="Force refresh even if graph.md is not stale."),
@@ -305,9 +301,12 @@ def main(
         console.print("[bold green]relic updated.[/bold green]")
         return
 
-    # Subcommands (init, index, query) handle their own config loading.
+    # Subcommands (init, index, query) are routed by Click before this callback.
+    # With allow_extra_args=True, any remaining positional args land in ctx.args.
     if ctx.invoked_subcommand is not None:
         return
+
+    subprojects_arg: list[str] = list(ctx.args)
 
     cfg = _load_config()
     all_subprojects: dict = cfg["subprojects"]

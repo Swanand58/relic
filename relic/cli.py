@@ -1,6 +1,5 @@
 """Relic CLI — entry point for all commands."""
 
-import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -14,18 +13,15 @@ from rich.table import Table
 from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.discovery import discover_subprojects
-from relic.generator import emit_refresh_all, emit_refresh_prompt
 from relic.indexer import load_graph, run_index
 from relic.mcp_server import run as run_mcp
-from relic.staleness import check_all_staleness, is_stale
 from relic.toon import full_index_to_toon, subgraph_to_toon
 
 app = typer.Typer(
     name="relic",
-    help="Codebase knowledge management — load and refresh graph.md knowledge files.",
+    help="Codebase knowledge management — build and query a static knowledge graph.",
     add_completion=False,
     no_args_is_help=True,
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -34,9 +30,6 @@ err_console = Console(stderr=True)
 CONFIG_FILE = Path("relic.yaml")
 KNOWLEDGE_DIR = Path(".knowledge")
 PROJECT_ROOT = Path.cwd()
-
-# Subproject names must be simple identifiers — no path traversal via CLI args.
-_SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _load_config() -> dict:
@@ -63,28 +56,6 @@ def _load_config() -> dict:
 
     return cfg
 
-
-def _validate_names(names: tuple[str, ...], subprojects: dict) -> None:
-    """Exit with an error if any name is unsafe or not defined in relic.yaml.
-
-    Name validation rejects path traversal attempts passed via CLI args
-    (e.g. `relic ../../etc`).
-    """
-    for n in names:
-        if not _SAFE_NAME_RE.match(n):
-            console.print(
-                f"[bold red]Invalid subproject name:[/bold red] '{n}'\n"
-                "Names must contain only letters, numbers, hyphens, and underscores."
-            )
-            raise SystemExit(1)
-
-    unknown = [n for n in names if n not in subprojects]
-    if unknown:
-        console.print(
-            f"[bold red]Unknown subproject(s):[/bold red] {', '.join(unknown)}\n"
-            f"Defined: {', '.join(subprojects.keys())}"
-        )
-        raise SystemExit(1)
 
 
 def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
@@ -280,14 +251,11 @@ def mcp_cmd() -> None:
 def main(
     ctx: typer.Context,
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
-    refresh: bool = typer.Option(False, "--refresh", "-r", help="Emit graph.md generation prompt(s) to stdout. Skips fresh subprojects unless --force is set."),
-    force: bool = typer.Option(False, "--force", "-f", help="Force refresh even if graph.md is not stale."),
-    stale: bool = typer.Option(False, "--stale", "-s", help="Check which graphs are stale."),
     init: Optional[str] = typer.Option(None, "--init", "-i", help=f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'.", metavar="AGENT"),
     update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
-    """Relic — load knowledge graphs into your clipboard for AI coding sessions."""
+    """Relic — build and query a static knowledge graph for AI coding agents."""
     if version:
         console.print(f"relic {__version__}")
         return
@@ -321,12 +289,9 @@ def main(
         console.print("[bold green]relic updated.[/bold green]")
         return
 
-    # Subcommands (init, index, query) are routed by Click before this callback.
-    # With allow_extra_args=True, any remaining positional args land in ctx.args.
+    # Subcommands (init, index, query, mcp) are routed by Click before this callback.
     if ctx.invoked_subcommand is not None:
         return
-
-    subprojects_arg: list[str] = list(ctx.args)
 
     cfg = _load_config()
     all_subprojects: dict = cfg["subprojects"]
@@ -340,29 +305,6 @@ def main(
         for name, info in all_subprojects.items():
             table.add_row(name, info.get("path", ""), info.get("description", ""))
         console.print(table)
-        return
-
-    # --stale
-    if stale:
-        results = check_all_staleness(all_subprojects, KNOWLEDGE_DIR)
-        table = Table(title="Staleness Check", show_lines=True)
-        table.add_column("Subproject", style="bold")
-        table.add_column("Stale", justify="center")
-        table.add_column("Reason")
-        for r in results:
-            stale_label = "[red]yes[/red]" if r["stale"] else "[green]no[/green]"
-            table.add_row(r["name"], stale_label, r["reason"])
-        console.print(table)
-        return
-
-    # --refresh [NAME ...]  — positional args act as filter when --refresh is set
-    if refresh:
-        if subprojects_arg:
-            _validate_names(tuple(subprojects_arg), all_subprojects)
-            for name in subprojects_arg:
-                emit_refresh_prompt(name, all_subprojects[name], KNOWLEDGE_DIR, PROJECT_ROOT)
-        else:
-            emit_refresh_all(all_subprojects, KNOWLEDGE_DIR, PROJECT_ROOT, force=force)
         return
 
     # no args — typer prints help automatically via no_args_is_help=True

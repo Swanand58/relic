@@ -87,39 +87,69 @@ def subgraph_to_toon(
 ) -> str:
     """Render a knowledge graph subgraph as a TOON document.
 
-    All lists contain only the nodes/edges relevant to the queried file
-    (already filtered by the caller to the 2-hop neighbourhood).
+    Symbols are split into two sections for token efficiency:
+    - focus_symbols: full detail (name, type, line) for the focus file only
+    - neighbor_symbols: name+type only for all other files (no line noise)
+
+    Neighbor files are listed as paths only — no repeated symbol detail.
     """
     w = ToonWriter()
 
     w.kv("focus", focus_path).blank()
 
-    if file_nodes:
+    # Neighbor files (everything except the focus file)
+    neighbor_files = [f for f in file_nodes if f["path"] != focus_path]
+    if neighbor_files:
         w.table(
-            "files",
+            "neighbors",
             ["path", "language", "subproject"],
-            [[f["path"], f["language"], f["subproject"]] for f in file_nodes],
+            [[f["path"], f["language"], f["subproject"]] for f in neighbor_files],
         ).blank()
 
-    if symbol_nodes:
+    # Symbols defined in the focus file — full detail
+    focus_symbols = [s for s in symbol_nodes if s["path"] == focus_path]
+    if focus_symbols:
         w.table(
-            "symbols",
-            ["name", "type", "file", "line"],
-            [[s["name"], s["stype"], s["path"], s["line"]] for s in symbol_nodes],
+            "exports",
+            ["name", "type", "line"],
+            [[s["name"], s["stype"], s["line"]] for s in focus_symbols],
         ).blank()
 
-    if import_edges:
+    # Symbols from neighbor files — name+type only, grouped by file would be ideal
+    # but flat list keeps parser simple; file column retained for lookup
+    neighbor_symbols = [s for s in symbol_nodes if s["path"] != focus_path]
+    if neighbor_symbols:
+        w.table(
+            "neighbor_symbols",
+            ["name", "type", "file"],
+            [[s["name"], s["stype"], s["path"]] for s in neighbor_symbols],
+        ).blank()
+
+    # Only show import edges that involve the focus file directly.
+    # Edges between neighbor files are irrelevant noise for pre-edit context.
+    focus_imports = [(a, b) for a, b in import_edges if a == focus_path]
+    focus_imported_by = [(a, b) for a, b in import_edges if b == focus_path]
+
+    if focus_imports:
         w.table(
             "imports",
             ["from", "to"],
-            [[a, b] for a, b in import_edges],
+            [[a, b] for a, b in focus_imports],
         ).blank()
 
-    if extends_edges:
+    if focus_imported_by:
+        w.table(
+            "imported_by",
+            ["from", "to"],
+            [[a, b] for a, b in focus_imported_by],
+        ).blank()
+
+    focus_extends = [(a, b) for a, b in extends_edges if a == focus_path or b == focus_path]
+    if focus_extends:
         w.table(
             "extends",
             ["child", "parent"],
-            [[a, b] for a, b in extends_edges],
+            [[a, b] for a, b in focus_extends],
         ).blank()
 
     return w.build().strip()

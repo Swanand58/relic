@@ -19,20 +19,11 @@
 
 | Feature | Branch | Notes |
 |---|---|---|
-| Phase 3 polish + tests | `chore/phase-3-tests-and-polish` | 112-test pytest suite (search, toon, agent_config, MCP handlers, stats); subproject validation with available-list error; "Did you mean?" suggestions for unresolved query targets via case/style-normalized substring scoring; `relic stats` CLI subcommand sharing logic with the MCP tool; tightened MCP descriptions for `relic_query`, `relic_reindex`, `relic_stats` with imperative wording and follow-up actions |
+| Phase 4 — `relic watch` + `relic coverage` | `feat/watch-and-coverage` | Watchdog-backed filesystem watcher with 500 ms debounce and re-entrant pending flag; coverage report classifying files into indexed / no_parser / too_large / symlink with per-subproject breakdown and `--verbose` listing. 25 new tests (137 total). README updates. |
 
 ---
 
-## Phase 4 — still on the radar (priority: medium)
-
-**`relic watch`**
-- Filesystem watcher (watchdog). Rebuilds index on source file changes.
-- Run once in a terminal tab: `relic watch`.
-- Passive, agent-agnostic alternative to `relic_reindex` — useful when the agent forgets to call the tool.
-
-**`relic coverage`**
-- Shows % of codebase indexed, which files were skipped and why (size limit, no parser, binary, etc).
-- Without this, silent incompleteness looks like model error, not tool limit.
+## Phase 5 — still on the radar (priority: medium)
 
 **`relic diff`**
 - Compares current source state against last index snapshot.

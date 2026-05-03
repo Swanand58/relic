@@ -1,45 +1,55 @@
 # relic
 
-CLI tool that builds a static knowledge graph from your codebase and automatically injects precise, token-efficient context into your AI coding agent before every file read or edit — no manual commands, no cold reads, no hallucinations.
+Relic solves the cold-read problem in AI coding agents.
 
-Works with any AI coding agent: Claude Code, GitHub Copilot, OpenAI Codex, Cursor, etc.
+Every time an agent opens a file it reads that file, then the files it imports, then the files those import — just to understand what connects to what. That's 5-10 file reads before it can start on your actual task. Every read costs tokens.
+
+Relic builds a static knowledge graph from your source code in seconds (no LLM). Before the agent touches any file, it automatically receives:
+
+- What that file exports (exact symbol names and line numbers)
+- What it imports (actual resolved paths, not guesses)
+- What else in the codebase depends on it
+
+300–1200 tokens. Injected automatically via a Claude Code hook. Zero workflow change.
 
 ---
 
 ## How it works
 
 ```
-relic index                    # scan codebase → .knowledge/index.pkl  (seconds, no LLM)
-relic --init claude            # write CLAUDE.md + PreToolUse hook
+relic init              # auto-detect subprojects → relic.yaml
+relic index             # static analysis → .knowledge/index.pkl  (seconds, no LLM)
+relic --init claude     # write CLAUDE.md + PreToolUse hook + MCP server config
 ```
 
-From that point, every time your agent reads or edits a file, the hook fires automatically:
+From that point, every Read or Edit fires automatically:
 
 ```
-relic query src/payments/processor.py
+focus: src/core/PageExtension.ts
+
+neighbors[9]{path,language,subproject}:
+  src/types.ts,typescript,src
+  src/layout/presets.ts,typescript,src
+  src/pagination/PaginationPlugin.ts,typescript,src
+  ...
+
+exports[8]{name,type,line}:
+  resolvePageSize,function,21
+  resolveMargins,function,29
+  resolveHeader,function,38
+  FolioStorage,interface,67
+  ...
+
+imports[8]{from,to}:
+  src/core/PageExtension.ts,src/types.ts
+  src/core/PageExtension.ts,src/layout/presets.ts
+  ...
+
+imported_by[1]{from,to}:
+  src/index.ts,src/core/PageExtension.ts
 ```
 
-The agent receives a TOON context block before touching the file:
-
-```
-focus: src/payments/processor.py
-
-files[3]{path,language,subproject}:
-  src/payments/processor.py,python,payments
-  src/payments/models.py,python,payments
-  src/core/database.py,python,core
-
-symbols[5]{name,type,file,line}:
-  PaymentProcessor,class,src/payments/processor.py,12
-  process_charge,function,src/payments/processor.py,34
-  handle_refund,function,src/payments/processor.py,67
-
-imports[2]{from,to}:
-  src/payments/processor.py,src/payments/models.py
-  src/payments/processor.py,src/core/database.py
-```
-
-300–800 tokens per query. No LLM needed to build the index. No cold reads. No hallucinated imports.
+Agent knows the structure before reading the code. Fewer follow-up reads. No hallucinated imports. No surprise broken callers.
 
 ---
 
@@ -59,13 +69,13 @@ uv tool update-shell
 
 Then open a new terminal tab.
 
-### Upgrade to latest
+### Upgrade
 
 ```bash
 relic --update
 ```
 
-### Local dev install
+### Local dev
 
 ```bash
 uv tool install --editable .
@@ -75,175 +85,72 @@ uv tool install --editable .
 
 ## Setup
 
-Run all setup commands **in your own terminal** — not inside the coding agent.
+Run all setup commands **in your terminal** — not inside the agent.
 
-### Step 1 — auto-discover subprojects
+### 1. Discover subprojects
 
 ```bash
 cd your-project
 relic init
 ```
 
-Walks the project, detects subprojects from package manifests and source directories, writes `relic.yaml`, and adds `relic.yaml` and `.knowledge/` to `.gitignore`. Takes a second.
+Walks the project, detects subprojects from package manifests and source directories, writes `relic.yaml`, adds `relic.yaml` and `.knowledge/` to `.gitignore`. Both are personal — gitignored by design.
 
-`relic.yaml` is personal config — gitignored by design. Each developer runs `relic init` on their own machine.
-
-### Step 2 — build the knowledge graph
+### 2. Build the index
 
 ```bash
 relic index
 ```
 
-Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance relationships. Writes `.knowledge/index.pkl`.
+Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance. Writes `.knowledge/index.pkl` and a human-readable `.knowledge/index.toon`.
 
-Run this again after significant codebase changes.
+Re-run after significant codebase changes.
 
-### Step 3 — wire up your coding agent
+### 3. Wire your agent
 
 ```bash
-relic --init claude     # Claude Code   → CLAUDE.md + .claude/settings.json hook
+relic --init claude     # Claude Code   → CLAUDE.md + .claude/settings.json
 relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md
 relic --init cursor     # Cursor        → .cursorrules
 relic --init codex      # OpenAI Codex  → AGENTS.md
 relic --init all        # all of the above
 ```
 
-For Claude Code, this also installs a **PreToolUse hook** into `.claude/settings.json`. The hook runs `relic query <file>` automatically before every Read or Edit — no manual commands needed.
+For Claude Code this also installs a **PreToolUse hook** and registers the **relic MCP server**. The hook runs `relic query <file>` before every Read and Edit — no manual commands needed.
 
 Re-running `--init` is safe — it updates the existing block without duplicating it.
 
 ---
 
-## That's it — start coding
+## Query context manually
 
-With the hook active, your agent automatically gets context before touching any file. No paste, no prompt, no warm-up.
-
-To query context manually (or for non-hook agents):
+The hook handles this automatically, but you can also query directly:
 
 ```bash
-relic query src/payments/processor.py
-relic query PaymentProcessor            # by symbol name
-relic query src/payments/processor.py --depth 3   # wider neighbourhood
+relic query src/core/PageExtension.ts
+relic query resolveMargins               # by symbol name
+relic query src/core/PageExtension.ts --depth 3   # wider graph
 ```
+
+Output is TOON (Token-Oriented Object Notation) — tabular format that declares column names once and lists values row by row. ~40% fewer tokens than equivalent JSON for the same data.
 
 ---
 
-## Full command reference
+## Commands
 
 ```bash
-relic init                     # auto-discover subprojects, write relic.yaml, update .gitignore
+relic init                     # auto-discover subprojects, write relic.yaml
 relic index                    # build knowledge graph from source (no LLM)
 relic query <file|symbol>      # print TOON context subgraph to stdout
-relic query <file> --depth N   # adjust BFS traversal depth (default 2)
+relic query <file> --depth N   # adjust traversal depth (default 2)
+relic mcp                      # start MCP stdio server (relic_query tool)
 
-relic --list                   # list subprojects defined in relic.yaml
-relic --stale                  # check which graph.md docs are out of date
-relic --refresh                # emit prompts for stale/missing graph.md docs only
-relic --refresh <name>         # emit prompt for one subproject
-relic --refresh --force        # force regenerate all graph.md docs
-
-relic --init <agent>           # write relic instructions into agent config file
-relic --init all               # write instructions for all supported agents
+relic --list                   # list subprojects in relic.yaml
+relic --init <agent>           # write agent config + hook
+relic --init all               # write config for all supported agents
 relic --update                 # pull latest from GitHub main and reinstall
-relic --version                # print installed version
+relic --version                # print version
 ```
-
----
-
-## Example: backend (payment app)
-
-```
-backend/
-├── payments/       # Stripe integration, charge logic
-├── auth/           # JWT, user sessions
-└── notifications/  # Email + push after payment events
-```
-
-**Setup (once per machine):**
-
-```bash
-cd backend
-relic init              # discovers payments, auth, notifications → relic.yaml
-relic index             # builds graph in ~2 seconds
-relic --init claude     # wires CLAUDE.md + hook
-```
-
-**Start a new session — zero manual context loading:**
-
-Open Claude Code. The hook fires before the first Read. Agent immediately knows:
-
-- `PaymentProcessor` is in `payments/processor.py:12`
-- It imports `ChargeModel` from `payments/models.py`
-- `notifications/sender.py` imports `PaymentProcessor`
-- None of this required reading or summarising any file
-
-**Working on a cross-subproject bug:**
-
-```bash
-relic query payments/processor.py --depth 3
-```
-
-Prints a wider TOON subgraph. Pipe it into the agent or paste it directly.
-
-**After a big refactor — rebuild the graph:**
-
-```bash
-relic index
-```
-
-Done in seconds. No LLM needed.
-
----
-
-## Graph.md knowledge docs (optional)
-
-For agents and workflows that prefer rich markdown documentation alongside the static graph, relic can generate LLM-written `graph.md` files per subproject.
-
-Run in your terminal — your active agent reads the output and writes the files:
-
-```bash
-relic --refresh            # generate for stale or missing docs only
-relic --refresh payments   # generate for one subproject
-relic --refresh --force    # regenerate everything
-```
-
-Your agent writes:
-
-```
-.knowledge/
-├── payments/graph.md
-├── auth/graph.md
-├── notifications/graph.md
-└── graph.md              # master index
-```
-
-Each `graph.md` contains: subproject summary, entry points, key entities, API surface, cross-project dependencies, folder structure, and a confidence self-assessment.
-
-Check staleness:
-
-```bash
-relic --stale
-```
-
-```
-┌───────────────┬───────┬──────────────────────────────────┐
-│ payments      │  yes  │ Commit 2024-01-15 newer than doc │
-│ auth          │  no   │ Graph is up to date              │
-│ notifications │  yes  │ graph.md does not exist          │
-└───────────────┴───────┴──────────────────────────────────┘
-```
-
----
-
-## Token efficiency
-
-| Approach | Tokens per context load |
-|---|---|
-| Full graph.md paste | ~35,000 |
-| `relic query` (TOON, depth=2) | 300–800 |
-| `relic query` (depth=3) | 800–2,000 |
-
-The static graph never makes LLM calls. Build it once, query it thousands of times.
 
 ---
 
@@ -258,24 +165,52 @@ The static graph never makes LLM calls. Build it once, query it thousands of tim
 
 ---
 
-## Keeping graphs out of your repo
+## MCP server
 
-`relic init` automatically adds `relic.yaml` and `.knowledge/` to the project's `.gitignore`. These are local to each developer's machine.
+Relic exposes `relic_query` as a native MCP tool. For Claude Code, `relic --init claude` registers it automatically. For other MCP-compatible agents:
 
-If you want teammates to share the same index, remove those lines from `.gitignore` and commit `.knowledge/` alongside code changes.
+```json
+"mcpServers": {
+  "relic": { "command": "relic", "args": ["mcp"] }
+}
+```
+
+Agents call `relic_query` directly instead of running a shell command.
+
+---
+
+## Agentic pipelines (Blueprint, LangGraph, custom orchestrators)
+
+Relic is designed to slot into multi-agent workflows. One `relic index` call, every agent in the chain benefits.
+
+Typical integration:
+- **Orchestrator** — `relic query` to identify relevant files without reading them, scope the task cheaply
+- **Planning agent** — knows the dependency graph before planning, avoids plans that break callers
+- **Implementation agent** — gets exact symbol names and paths, no hallucinated imports
+- **Review agent** — sees `imported_by` edges, knows what to test beyond the changed file
+
+The MCP server is the cleanest integration point — register once, all agents in the session get `relic_query` as a native tool.
+
+---
+
+## Token comparison
+
+| Approach | Context per file touch |
+|---|---|
+| Agent reads file + all imports manually | 5,000–40,000 tokens |
+| `relic query` (depth=1, hook default) | 300–1,200 tokens |
+| `relic query` (depth=2) | 800–3,000 tokens |
 
 ---
 
 ## Security
 
-**Path traversal prevention** — subproject paths in `relic.yaml` are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected before any files are read.
+**Path traversal prevention** — subproject paths in `relic.yaml` are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected.
 
-**Symlink blocking** — relic skips all symlinks when walking directories, preventing escape outside the subproject.
+**Symlink blocking** — relic skips all symlinks when walking directories.
 
-**CLI argument sanitisation** — subproject names are validated against `[a-zA-Z0-9_-]` only. Attempts like `relic ../../etc` are rejected immediately.
+**CLI argument sanitisation** — the query target is validated before shell execution.
 
-**Prompt injection defence** — file content in `--refresh` prompts is wrapped in explicit delimiters and the agent is instructed to treat it as data, not instructions.
+**File size limits** — skips files over 200 KB, caps at 500 files per subproject.
 
-**File size limits** — relic skips files over 200 KB (indexer) / 100 KB (refresh prompts) and caps at 500 files per subproject.
-
-**No external calls** — no API calls, no telemetry, no network access. Code never leaves your machine. The `--update` command passes only the hardcoded `github.com/Swanand58/relic@main` URL to uv — no user input reaches the shell.
+**No external calls** — no API calls, no telemetry. Code never leaves your machine. `--update` passes only the hardcoded `github.com/Swanand58/relic@main` URL to uv.

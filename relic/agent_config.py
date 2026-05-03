@@ -102,7 +102,7 @@ _HOOK_COMMAND = (
     "d=json.loads(sys.stdin.read());"
     "inp=d.get('tool_input',d);"
     "f=inp.get('file_path','') or inp.get('path','');"
-    "r=subprocess.run([str(pathlib.Path.home()/'.local/bin/relic'),'query',f],capture_output=True,text=True) if f else None;"
+    "r=subprocess.run([str(pathlib.Path.home()/'.local/bin/relic'),'query',f,'--depth','1'],capture_output=True,text=True) if f else None;"
     "c=r.stdout if r and r.returncode==0 and r.stdout.strip() else '';"
     "print(json.dumps({'hookSpecificOutput':{'additionalContext':c}})) if c else None"
     "\""

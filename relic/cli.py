@@ -14,6 +14,7 @@ import yaml
 
 from relic import __version__, style
 from relic.agent_config import AGENTS, init_agent, init_all_agents
+from relic.audit import compute_audit, render_audit
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
 from relic.discovery import discover_subprojects
@@ -394,6 +395,20 @@ def mcp_cmd() -> None:
         "mcpServers": { "relic": { "command": "relic", "args": ["mcp"] } }
     """
     run_mcp()
+
+
+@app.command(name="audit")
+def audit_cmd() -> None:
+    """Measure relic's own token footprint in the agent context.
+
+    Shows the instruction block written to CLAUDE.md / .cursorrules,
+    the MCP tool schemas the agent loads every turn, and a sample
+    relic_query against your real graph. Use this to verify relic isn't
+    itself part of the 73% overhead problem documented for AI coding
+    agents — the baseline tax should stay well under 1,500 tokens.
+    """
+    audit = compute_audit(PROJECT_ROOT, KNOWLEDGE_DIR)
+    render_audit(audit, console)
 
 
 @app.command(name="benchmark")

@@ -31,11 +31,12 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from rich.console import Console
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from relic import style
 from relic.indexer import LANGUAGE_MAP, SKIP_DIRS, run_index
+from relic.style import console, err_console
 
 DEBOUNCE_SECONDS = 0.5
 
@@ -150,9 +151,6 @@ def run_watch(
     The function returns when the user sends Ctrl+C. Any other exception bubbles
     up so the CLI layer can render it.
     """
-    console = Console()
-    err_console = Console(stderr=True)
-
     def _do_reindex() -> None:
         t0 = time.monotonic()
         G = run_index(project_root, knowledge_dir, config_file)
@@ -162,15 +160,17 @@ def run_watch(
         edges = G.number_of_edges()
         ts = time.strftime("%H:%M:%S")
         console.print(
-            f"[dim]{ts}[/dim] reindex: "
-            f"[cyan]{files}[/cyan] files, "
-            f"[cyan]{symbols}[/cyan] symbols, "
-            f"[cyan]{edges}[/cyan] edges "
-            f"[dim]({elapsed:.2f}s)[/dim]"
+            f"[{style.DIM}]{ts}[/]  "
+            f"[{style.PRIMARY}]reindex[/]  "
+            f"[{style.DIM}]{style.DOT}[/]  "
+            f"[bold {style.FG}]{files}[/] files  "
+            f"[bold {style.FG}]{symbols}[/] symbols  "
+            f"[bold {style.FG}]{edges}[/] edges  "
+            f"[{style.DIM}]({elapsed:.2f}s)[/]"
         )
 
     def _on_error(exc: BaseException) -> None:
-        err_console.print(f"[bold red]reindex failed:[/bold red] {exc}")
+        err_console.print(style.error(f"reindex failed: {exc}"))
 
     handler = DebouncedReindex(
         _do_reindex,
@@ -182,17 +182,18 @@ def run_watch(
     observer.schedule(handler, str(project_root), recursive=True)
     observer.start()
 
+    console.print(style.header("watch"))
     console.print(
-        f"[bold cyan]relic watch[/bold cyan] — monitoring "
-        f"[dim]{project_root}[/dim] (debounce {int(debounce_seconds * 1000)} ms)"
+        f"   [{style.DIM}]monitoring[/] {project_root}  "
+        f"[{style.DIM}]{style.DOT}  {int(debounce_seconds * 1000)} ms debounce  "
+        f"{style.DOT}  Ctrl+C to stop[/]\n"
     )
-    console.print("[dim]Ctrl+C to stop.[/dim]\n")
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        console.print("\n[dim]stopping…[/dim]")
+        console.print(style.dim("\n   stopping…"))
     finally:
         handler.flush()
         observer.stop()

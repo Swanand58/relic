@@ -57,7 +57,7 @@ instructions into `AGENTS.md` — the agent uses the CLI tools documented there.
 
 ### Custom agents / orchestrators
 
-Any MCP client (LangGraph, Blueprint, custom stdio client) can connect:
+Any MCP client (LangGraph, custom stdio client) can connect:
 
 ```python
 import subprocess

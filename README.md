@@ -176,7 +176,7 @@ relic --version                # print version
 
 ---
 
-## Agentic pipelines (Blueprint, LangGraph, custom orchestrators)
+## Agentic pipelines (LangGraph, custom orchestrators)
 
 Relic slots into multi-agent workflows. One `relic index` call, every agent in the chain benefits.
 

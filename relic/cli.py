@@ -16,7 +16,8 @@ from relic.benchmark import run_benchmark
 from relic.discovery import discover_subprojects
 from relic.indexer import load_graph, run_index
 from relic.mcp_server import run as run_mcp
-from relic.toon import full_index_to_toon, subgraph_to_toon
+from relic.search import render_search_toon, search_graph
+from relic.toon import candidates_to_toon, full_index_to_toon, subgraph_to_toon
 
 app = typer.Typer(
     name="relic",
@@ -170,32 +171,41 @@ def query_cmd(
         raise SystemExit(1)
 
     # Normalise path — try multiple forms to match node IDs.
-    # Hooks pass absolute paths; index stores relative paths from project root.
+    # Users may pass relative or absolute paths from any cwd inside the project.
     target_norm = target.lstrip("./")
-    candidates = [target, target_norm, str(Path(target))]
+    path_candidates = [target, target_norm, str(Path(target))]
     abs_target = Path(target)
     if abs_target.is_absolute():
         try:
-            candidates.append(str(abs_target.relative_to(PROJECT_ROOT)))
+            path_candidates.append(str(abs_target.relative_to(PROJECT_ROOT)))
         except ValueError:
             pass
 
     node_id = None
-    for candidate in candidates:
+    for candidate in path_candidates:
         if candidate in G.nodes:
             node_id = candidate
             break
 
-    # If not found as file, try as symbol name
+    # If not found as file, try as symbol name — collect all matches so we
+    # can render a disambiguation list when the name is overloaded.
     if node_id is None:
-        for n, d in G.nodes(data=True):
-            if d.get("ntype") == "symbol" and d.get("name") == target:
-                node_id = n
-                break
-
-    if node_id is None:
-        console.print(f"[bold red]Not found:[/bold red] '{target}' not in index. Run `relic index` first.")
-        raise SystemExit(1)
+        symbol_matches = [
+            n for n, d in G.nodes(data=True)
+            if d.get("ntype") == "symbol" and d.get("name") == target
+        ]
+        if not symbol_matches:
+            console.print(f"[bold red]Not found:[/bold red] '{target}' not in index. Run `relic index` first.")
+            raise SystemExit(1)
+        if len(symbol_matches) > 1:
+            cand_data = [G.nodes[n] for n in symbol_matches]
+            print(candidates_to_toon(target, cand_data))
+            err_console.print(
+                f"[dim]ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
+                f"re-run with the file path to scope the query[/dim]"
+            )
+            return
+        node_id = symbol_matches[0]
 
     # BFS traversal up to `depth` hops (both directions)
     neighbours = {node_id}
@@ -233,6 +243,46 @@ def query_cmd(
     # Status — goes to stderr so it doesn't pollute stdout
     err_console.print(
         f"[dim]query: {node_id} | {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}[/dim]"
+    )
+
+
+@app.command(name="search")
+def search_cmd(
+    query: str = typer.Argument(..., help="Search term — file path or symbol name."),
+    kind: str = typer.Option("all", "--kind", "-k", help="Filter results: file, symbol, or all."),
+    subproject: Optional[str] = typer.Option(
+        None, "--subproject", "-s",
+        help="Restrict results to a single subproject (as named in relic.yaml).",
+    ),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max results per category."),
+) -> None:
+    """Search the knowledge graph for files and symbols by name.
+
+    Results are ranked: exact > prefix > substring, with well-connected nodes
+    surfacing first on ties. Output is TOON, same format as the relic_search
+    MCP tool.
+    """
+    if kind not in ("file", "symbol", "all"):
+        console.print(f"[bold red]Invalid --kind:[/bold red] {kind!r}. Choose file, symbol, or all.")
+        raise SystemExit(1)
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise SystemExit(1)
+
+    file_matches, symbol_matches = search_graph(
+        G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
+    )
+
+    print(render_search_toon(query, file_matches, symbol_matches))
+
+    err_console.print(
+        f"[dim]search: '{query}' | "
+        f"{len(file_matches)} file(s), {len(symbol_matches)} symbol(s)"
+        + (f" | subproject={subproject}" if subproject else "")
+        + "[/dim]"
     )
 
 

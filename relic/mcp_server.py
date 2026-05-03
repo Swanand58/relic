@@ -24,7 +24,8 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from relic.indexer import load_graph, run_index
-from relic.toon import subgraph_to_toon
+from relic.search import render_search_toon, search_graph
+from relic.toon import candidates_to_toon, subgraph_to_toon
 
 KNOWLEDGE_DIR = Path(".knowledge")
 CONFIG_FILE = Path("relic.yaml")
@@ -36,16 +37,24 @@ server = Server("relic")
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_node(G, target: str) -> str | None:
-    """Find node ID for a file path or symbol name. Returns None if not found."""
+def _resolve_node(G, target: str) -> list[str]:
+    """Find node IDs for a file path or symbol name.
+
+    File-path resolution returns at most one match (paths are unique node IDs).
+    Symbol-name resolution returns every matching symbol so callers can render
+    a disambiguation list when more than one definition exists.
+
+    Returns [] when nothing matches.
+    """
     target_norm = target.lstrip("./")
     for candidate in [target, target_norm, str(Path(target))]:
         if candidate in G.nodes:
-            return candidate
+            return [candidate]
+    matches: list[str] = []
     for n, d in G.nodes(data=True):
         if d.get("ntype") == "symbol" and d.get("name") == target:
-            return n
-    return None
+            matches.append(n)
+    return matches
 
 
 def _bfs_subgraph(G, node_id: str, depth: int):
@@ -131,7 +140,8 @@ async def list_tools() -> list[Tool]:
                 "Search for files and symbols across the knowledge graph by name. "
                 "Use this when you don't know where something lives — "
                 "pass a class name, function name, or partial file path. "
-                "Returns matching files and symbols in TOON format."
+                "Results are ranked: exact > prefix > substring, with well-connected "
+                "nodes surfacing first on ties. Returns TOON."
             ),
             inputSchema={
                 "type": "object",
@@ -140,7 +150,7 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": (
                             "Search term — partial file path or symbol name "
-                            "(case-insensitive substring match)"
+                            "(case-insensitive)"
                         ),
                     },
                     "kind": {
@@ -148,6 +158,13 @@ async def list_tools() -> list[Tool]:
                         "description": "Filter results: 'file', 'symbol', or 'all' (default 'all')",
                         "enum": ["file", "symbol", "all"],
                         "default": "all",
+                    },
+                    "subproject": {
+                        "type": "string",
+                        "description": (
+                            "Restrict results to a single subproject (as named in "
+                            "relic.yaml). Useful in monorepos to avoid cross-subproject noise."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
@@ -214,20 +231,26 @@ def _handle_query(args: dict) -> list[TextContent]:
     if err:
         return [TextContent(type="text", text=err)]
 
-    node_id = _resolve_node(G, target)
-    if node_id is None:
+    matches = _resolve_node(G, target)
+    if not matches:
         return [TextContent(
             type="text",
             text=f"Not found: '{target}'. Try relic_search to locate it, or relic_reindex if recently added.",
         )]
 
+    if len(matches) > 1:
+        candidates = [G.nodes[n] for n in matches]
+        return [TextContent(type="text", text=candidates_to_toon(target, candidates))]
+
+    node_id = matches[0]
     subgraph = _bfs_subgraph(G, node_id, depth)
     return [TextContent(type="text", text=_to_toon(subgraph, node_id))]
 
 
 def _handle_search(args: dict) -> list[TextContent]:
-    query: str = args.get("query", "").lower()
+    query: str = args.get("query", "")
     kind: str = args.get("kind", "all")
+    subproject = args.get("subproject") or None
     limit: int = int(args.get("limit", 20))
 
     if not query:
@@ -237,35 +260,10 @@ def _handle_search(args: dict) -> list[TextContent]:
     if err:
         return [TextContent(type="text", text=err)]
 
-    file_matches: list[dict] = []
-    symbol_matches: list[dict] = []
-
-    for n, d in G.nodes(data=True):
-        ntype = d.get("ntype")
-        if ntype == "file" and kind in ("file", "all"):
-            if query in n.lower():
-                file_matches.append(d)
-        elif ntype == "symbol" and kind in ("symbol", "all"):
-            if query in d.get("name", "").lower():
-                symbol_matches.append(d)
-
-    file_matches = file_matches[:limit]
-    symbol_matches = symbol_matches[:limit]
-
-    if not file_matches and not symbol_matches:
-        return [TextContent(type="text", text=f"No results for '{query}'.")]
-
-    lines = [f'search: "{query}"\n']
-    if file_matches:
-        lines.append(f"file_matches[{len(file_matches)}]{{path,language,subproject}}:")
-        for d in file_matches:
-            lines.append(f"  {d.get('path','')},{d.get('language','')},{d.get('subproject','')}")
-    if symbol_matches:
-        lines.append(f"\nsymbol_matches[{len(symbol_matches)}]{{name,type,file}}:")
-        for d in symbol_matches:
-            lines.append(f"  {d.get('name','')},{d.get('stype','')},{d.get('path','')}")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    file_matches, symbol_matches = search_graph(
+        G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
+    )
+    return [TextContent(type="text", text=render_search_toon(query, file_matches, symbol_matches))]
 
 
 async def _handle_reindex() -> list[TextContent]:

@@ -104,7 +104,7 @@ relic index
 
 Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance. Writes `.knowledge/index.pkl` and a human-readable `.knowledge/index.toon`.
 
-Re-run after significant codebase changes, or use `relic_reindex` from inside the agent session.
+Re-run after significant codebase changes, or use `relic_reindex` from inside the agent session. To keep the index fresh automatically while you work, run `relic watch` in a separate terminal tab.
 
 ### 3. Wire your agent
 
@@ -147,6 +147,27 @@ Output is TOON (Token-Oriented Object Notation) — tabular format that declares
 
 ---
 
+## Keep the index fresh
+
+```bash
+relic watch
+```
+
+Runs in the foreground in a terminal tab. Listens to OS-native filesystem events (FSEvents on macOS, inotify on Linux, ReadDirectoryChangesW on Windows — no polling) and rebuilds the index when source files change. Bursts of edits are coalesced into a single reindex via a 500 ms debounce. Press Ctrl+C to stop.
+
+Useful when an agent forgets to call `relic_reindex` after writing files — the watcher backfills the gap. Same parser, same security posture as `relic index`: parse-only static analysis, symlinks skipped, files over 200 KB skipped, nothing executed.
+
+## Audit coverage
+
+```bash
+relic coverage
+relic coverage --verbose    # list every skipped file
+```
+
+Shows the count and identity of files that were indexed vs silently dropped, classified by reason: `no_parser` (extension not supported), `too_large` (over 200 KB), `symlink` (skipped for safety). Use this when a query unexpectedly comes back empty — it tells you whether the file is a tool limit instead of a model error.
+
+---
+
 ## Commands
 
 ```bash
@@ -158,6 +179,10 @@ relic search <term>            # ranked search across files and symbols
 relic search <term> -k symbol  # filter to symbols (or `file`, `all`)
 relic search <term> -s <name>  # restrict to a subproject
 relic stats                    # index health: counts, last_updated, subprojects
+relic watch                    # rebuild index automatically on file changes
+relic watch --debounce-ms 200  # tighter debounce window (default 500 ms)
+relic coverage                 # what's indexed vs skipped, with reasons
+relic coverage -v              # list every skipped file (not just samples)
 relic mcp                      # start MCP stdio server (4 tools)
 
 relic --list                   # list subprojects in relic.yaml

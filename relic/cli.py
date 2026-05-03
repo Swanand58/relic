@@ -13,6 +13,7 @@ from rich.table import Table
 from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.benchmark import run_benchmark
+from relic.coverage import compute_coverage, render_coverage
 from relic.discovery import discover_subprojects
 from relic.indexer import compute_stats, load_graph, run_index
 from relic.mcp_server import run as run_mcp
@@ -23,6 +24,7 @@ from relic.search import (
     suggest_close_matches,
 )
 from relic.toon import candidates_to_toon, full_index_to_toon, subgraph_to_toon
+from relic.watcher import run_watch
 
 app = typer.Typer(
     name="relic",
@@ -337,6 +339,59 @@ def stats_cmd() -> None:
     if stats["subprojects"]:
         table.add_row("subprojects", ", ".join(stats["subprojects"]))
     console.print(table)
+
+
+@app.command(name="watch")
+def watch_cmd(
+    debounce_ms: int = typer.Option(
+        500, "--debounce-ms", help="Coalesce filesystem events within this window."
+    ),
+) -> None:
+    """Watch source files and rebuild the index on every change.
+
+    Run this in a terminal tab while you work. Useful when an agent forgets
+    to call relic_reindex — the index stays current automatically. Uses
+    OS-native filesystem events (FSEvents/inotify/ReadDirectoryChangesW),
+    not polling. Press Ctrl+C to stop.
+    """
+    if not CONFIG_FILE.exists():
+        console.print(
+            f"[bold red]Error:[/bold red] {CONFIG_FILE} not found. Run `relic init` first."
+        )
+        raise SystemExit(1)
+    if not (KNOWLEDGE_DIR / "index.pkl").exists():
+        console.print(
+            "[bold red]Error:[/bold red] no index found. Run `relic index` once before `relic watch`."
+        )
+        raise SystemExit(1)
+
+    try:
+        run_watch(
+            PROJECT_ROOT,
+            KNOWLEDGE_DIR,
+            CONFIG_FILE,
+            debounce_seconds=max(0.05, debounce_ms / 1000),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise SystemExit(1)
+
+
+@app.command(name="coverage")
+def coverage_cmd(
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="List every skipped file, not just samples."
+    ),
+) -> None:
+    """Show what relic indexed and what it skipped, with reasons.
+
+    Without this, files dropped silently because of size limits, missing
+    parsers, or symlink rules look like model errors instead of tool limits.
+    Use it after `relic index` (or `relic watch`) to audit coverage.
+    """
+    cfg = _load_config()
+    coverage = compute_coverage(PROJECT_ROOT, cfg["subprojects"])
+    render_coverage(coverage, console, verbose=verbose)
 
 
 @app.command(name="mcp")

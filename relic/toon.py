@@ -155,6 +155,27 @@ def subgraph_to_toon(
     return w.build().strip()
 
 
+def candidates_to_toon(target: str, candidates: list[dict]) -> str:
+    """Render a TOON list of symbol candidates when a name matches multiple symbols.
+
+    Used by `relic_query` / `relic query` to surface every definition of an
+    ambiguous symbol so the agent can re-query with the full file path.
+
+    Each candidate dict is expected to carry: name, stype, path, line.
+    """
+    w = ToonWriter()
+    w.kv("ambiguous", f"'{target}' matches {len(candidates)} symbols").blank()
+    w.table(
+        "candidates",
+        ["name", "type", "file", "line"],
+        [
+            [d.get("name", ""), d.get("stype", ""), d.get("path", ""), d.get("line", 0)]
+            for d in candidates
+        ],
+    )
+    return w.build().strip()
+
+
 def full_index_to_toon(G: "nx.DiGraph") -> str:  # type: ignore[name-defined]
     """Render the entire graph as a TOON document (human-readable index)."""
     import networkx as nx

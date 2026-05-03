@@ -220,5 +220,9 @@ __marimo__/
 # uv — lock file IS committed (reproducible installs)
 # uv.lock — do not ignore
 
-# NOTE: .knowledge/ is intentionally NOT ignored.
-# All graph.md files should be committed.
+# Relic — personal config and machine-local index.
+# relic.yaml is per-developer (subproject layout), .knowledge/ holds the
+# binary index built by `relic index`. Both are recreated by running:
+#   relic init && relic index
+relic.yaml
+.knowledge/

@@ -240,8 +240,9 @@ def query_cmd(
 def mcp_cmd() -> None:
     """Start the relic MCP server (stdio transport).
 
-    Exposes relic_query as a native tool so agents call it directly
-    instead of running a shell command. Configure in .claude/settings.json:
+    Exposes four tools: relic_query, relic_search, relic_reindex, relic_stats.
+    Works with any MCP-compatible agent (Claude Code, Cursor, Copilot, Codex).
+    Configure in agent settings:
 
         "mcpServers": { "relic": { "command": "relic", "args": ["mcp"] } }
     """
@@ -251,7 +252,7 @@ def mcp_cmd() -> None:
 @app.command(name="benchmark")
 def benchmark_cmd(
     target: str = typer.Argument(..., help="File path to benchmark.", metavar="FILE"),
-    depth: int = typer.Option(1, "--depth", "-d", help="Graph traversal depth (default 1, matches hook)."),
+    depth: int = typer.Option(1, "--depth", "-d", help="Graph traversal depth (default 1)."),
 ) -> None:
     """Compare token cost of agent context with vs without relic.
 

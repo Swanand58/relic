@@ -1,12 +1,13 @@
-"""Agent config writer — injects relic instructions into coding agent config files.
+"""Agent config writer — injects relic instructions and MCP config for coding agents.
 
-Each agent has a different config file it reads at session start. This module
-writes the relic behaviour block into the right file for each agent so the agent
-automatically handles relic commands without manual prompting.
+Each agent reads a different config file at session start. This module writes the
+relic behaviour block and MCP server registration into the right files.
 
-For Claude Code, this also writes a PreToolUse hook into .claude/settings.json
-so `relic query` fires automatically before every Read/Edit, injecting TOON
-context into the agent without any manual command.
+MCP config paths per agent:
+  Claude Code  — .claude/settings.json       (mcpServers key)
+  Cursor       — .cursor/mcp.json            (mcpServers key)
+  Copilot      — .vscode/mcp.json            (servers key, VS Code 1.99+)
+  Codex        — instructions only (no standard MCP config file)
 """
 
 import json
@@ -22,77 +23,68 @@ RELIC_BLOCK_END = "<!-- relic:end -->"
 RELIC_INSTRUCTIONS = """\
 ## Relic — Codebase Knowledge Graph
 
-Relic is installed on this machine. It builds a static knowledge graph from source
-code and serves precise, token-efficient context to coding agents.
+Relic builds a static knowledge graph from source code. Use the MCP tools below
+to get precise, token-efficient context before editing code — ~300–1,200 tokens
+vs 5,000–40,000 for manual file reads.
 
-The relic binary lives at `~/.local/bin/relic`. If `relic` is not found in your
-shell PATH, use the full path: `~/.local/bin/relic`.
+### MCP Tools
 
-### Automatic context injection (Claude Code)
+**`relic_query`** — Get dependency context for a file or symbol.
+Call before editing unfamiliar code. Returns imports, exports, neighbors, and
+callers (files that import this file) in TOON format.
 
-Two mechanisms are active:
+**`relic_search`** — Search for files and symbols by name.
+Call when you don't know where a class, function, or file lives.
 
-1. **PreToolUse hook** — fires before every Read/Edit, runs `relic query <file>`,
-   injects TOON context automatically. No manual call needed.
-2. **MCP tool** — `relic_query` is available as a native tool. Call it directly
-   for any file or symbol to get precise dependency context on demand.
+**`relic_reindex`** — Rebuild the knowledge graph after writing files.
+Call after creating, editing, or deleting source files.
 
-You will see TOON context like:
+**`relic_stats`** — Check index health (files indexed, last updated).
+Call to verify the index is fresh before a large refactor.
+
+### Workflow
+
+1. Starting work on unfamiliar code → `relic_query <file_or_symbol>`
+2. Don't know where something lives → `relic_search <name>`
+3. After writing or deleting files → `relic_reindex`
+4. Index may be stale → `relic_stats`, then `relic_reindex` if needed
+
+### Reading TOON output
 
 ```
 focus: src/payments/processor.py
 
-files[3]{path,language,subproject}:
-  src/payments/processor.py,python,payments
+neighbors[3]{path,language,subproject}:
   src/payments/models.py,python,payments
   src/core/database.py,python,core
 
-symbols[5]{name,type,file,line}:
-  PaymentProcessor,class,src/payments/processor.py,12
-  ...
+exports[5]{name,type,line}:
+  PaymentProcessor,class,12
+  process_payment,function,45
+
+imports[2]{from,to}:
+  src/payments/processor.py,src/payments/models.py
+
+imported_by[1]{from,to}:
+  src/api/views.py,src/payments/processor.py
 ```
 
-Read this TOON block before editing — it tells you what the file imports,
-what it exports, and what else in the codebase depends on it.
+TOON tables declare column names once, then list values row-by-row.
+`imports` = this file imports from; `imported_by` = other files that depend on this file.
 
-### Commands
-
-**Build or rebuild the knowledge graph** (run after significant codebase changes):
-
-```bash
-~/.local/bin/relic index
-```
-
-**Query context for a specific file or symbol** (the hook does this automatically):
+### CLI (if MCP unavailable)
 
 ```bash
 ~/.local/bin/relic query src/payments/processor.py
 ~/.local/bin/relic query PaymentProcessor
-~/.local/bin/relic query src/payments/processor.py --depth 3
+~/.local/bin/relic index
 ```
 
 ### Knowledge graph files
 
-- Index (binary): `.knowledge/index.pkl`
-- TOON index (human-readable): `.knowledge/index.toon`
-
-These files are local to your machine and gitignored.
+- `.knowledge/index.pkl` — binary graph (gitignored, local only)
+- `.knowledge/index.toon` — human-readable TOON index (gitignored, local only)
 """
-
-# Shell command injected into .claude/settings.json as a PreToolUse hook.
-# Receives tool call JSON on stdin. Must output {"hookSpecificOutput":{"additionalContext":"..."}}
-# so Claude Code injects the TOON block before the tool result. Silently no-ops on any error.
-_HOOK_COMMAND = (
-    "python3 -c \""
-    "import json,sys,subprocess,pathlib;"
-    "d=json.loads(sys.stdin.read());"
-    "inp=d.get('tool_input',d);"
-    "f=inp.get('file_path','') or inp.get('path','');"
-    "r=subprocess.run([str(pathlib.Path.home()/'.local/bin/relic'),'query',f,'--depth','1'],capture_output=True,text=True) if f else None;"
-    "c=r.stdout if r and r.returncode==0 and r.stdout.strip() else '';"
-    "print(json.dumps({'hookSpecificOutput':{'additionalContext':c}})) if c else None"
-    "\""
-)
 
 
 def _wrap_block(content: str) -> str:
@@ -111,117 +103,117 @@ def _upsert_block(file_path: Path, content: str) -> str:
     existing = file_path.read_text(encoding="utf-8")
 
     if RELIC_BLOCK_START in existing:
-        # Replace existing block
         start = existing.index(RELIC_BLOCK_START)
         end = existing.index(RELIC_BLOCK_END) + len(RELIC_BLOCK_END)
         updated = existing[:start] + block + existing[end:].lstrip("\n")
         file_path.write_text(updated, encoding="utf-8")
         return "updated"
 
-    # Append to end
     separator = "\n\n" if existing.strip() else ""
     file_path.write_text(existing + separator + block, encoding="utf-8")
     return "updated"
 
 
-def _write_claude_hooks(project_root: Path) -> str:
-    """Write or update the relic PreToolUse hook in .claude/settings.json.
+AGENTS: dict[str, dict] = {
+    "claude": {
+        "name": "Claude Code",
+        "path": "CLAUDE.md",
+        # MCP config: merged into existing settings JSON under mcpServers key
+        "mcp_config": ".claude/settings.json",
+        "mcp_key": "mcpServers",
+        "mcp_server": {"command": "relic", "args": ["mcp"]},
+    },
+    "copilot": {
+        "name": "GitHub Copilot",
+        "path": ".github/copilot-instructions.md",
+        # VS Code workspace MCP config — requires VS Code 1.99+
+        "mcp_config": ".vscode/mcp.json",
+        "mcp_key": "servers",
+        "mcp_server": {"type": "stdio", "command": "relic", "args": ["mcp"]},
+    },
+    "cursor": {
+        "name": "Cursor",
+        "path": ".cursorrules",
+        "mcp_config": ".cursor/mcp.json",
+        "mcp_key": "mcpServers",
+        "mcp_server": {"command": "relic", "args": ["mcp"]},
+    },
+    "codex": {
+        "name": "OpenAI Codex",
+        "path": "AGENTS.md",
+        # No standard MCP config file for Codex CLI — instructions only
+    },
+}
 
-    Merges into existing settings — does not overwrite unrelated keys.
+
+def _write_mcp_config(agent_key: str, project_root: Path) -> str:
+    """Write MCP server registration for the given agent.
+
+    Merges into existing config — does not overwrite unrelated keys.
+    For Claude Code, also strips stale PreToolUse hooks from older relic versions.
     Returns 'created' or 'updated'.
     """
-    settings_path = project_root / ".claude" / "settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    agent = AGENTS[agent_key]
+    config_path = project_root / agent["mcp_config"]
+    config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if settings_path.exists():
+    if config_path.exists():
         try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            config = json.loads(config_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            settings = {}
+            config = {}
         action = "updated"
     else:
-        settings = {}
+        config = {}
         action = "created"
 
-    hooks = settings.setdefault("hooks", {})
-    pre_tool_use = hooks.setdefault("PreToolUse", [])
+    config.setdefault(agent["mcp_key"], {})["relic"] = agent["mcp_server"]
 
-    # Remove any existing relic hook entry to avoid duplicates
-    pre_tool_use[:] = [
-        entry for entry in pre_tool_use
-        if not (
-            isinstance(entry, dict)
-            and entry.get("matcher", "") in ("Read|Edit", "Read|Edit|Write")
-            and any(
-                isinstance(h, dict) and "relic" in h.get("command", "")
-                for h in entry.get("hooks", [])
+    # Claude Code only: strip stale relic PreToolUse hooks from older versions
+    if agent_key == "claude":
+        hooks = config.get("hooks", {})
+        pre_tool_use = hooks.get("PreToolUse", [])
+        cleaned = [
+            entry for entry in pre_tool_use
+            if not (
+                isinstance(entry, dict)
+                and any(
+                    isinstance(h, dict) and "relic" in h.get("command", "")
+                    for h in entry.get("hooks", [])
+                )
             )
-        )
-    ]
+        ]
+        if cleaned != pre_tool_use:
+            hooks["PreToolUse"] = cleaned
+            if not cleaned:
+                del hooks["PreToolUse"]
+            if not hooks:
+                config.pop("hooks", None)
+            else:
+                config["hooks"] = hooks
 
-    pre_tool_use.append({
-        "matcher": "Read|Edit",
-        "hooks": [
-            {
-                "type": "command",
-                "command": _HOOK_COMMAND,
-            }
-        ],
-    })
-
-    # MCP server registration
-    mcp_servers = settings.setdefault("mcpServers", {})
-    mcp_servers["relic"] = {
-        "command": "relic",
-        "args": ["mcp"],
-    }
-
-    settings_path.write_text(
-        json.dumps(settings, indent=2, ensure_ascii=False) + "\n",
+    config_path.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     return action
 
 
-AGENTS = {
-    "claude": {
-        "name": "Claude Code",
-        "path": "CLAUDE.md",
-    },
-    "copilot": {
-        "name": "GitHub Copilot",
-        "path": ".github/copilot-instructions.md",
-    },
-    "cursor": {
-        "name": "Cursor",
-        "path": ".cursorrules",
-    },
-    "codex": {
-        "name": "OpenAI Codex",
-        "path": "AGENTS.md",
-    },
-}
-
-
 def init_agent(agent_key: str, project_root: Path) -> None:
-    """Write relic instructions into the config file for a specific agent.
-
-    For Claude Code, also writes the PreToolUse hook into .claude/settings.json.
-    """
+    """Write relic instructions and MCP config for a specific agent."""
     agent = AGENTS[agent_key]
     target = project_root / agent["path"]
     action = _upsert_block(target, RELIC_INSTRUCTIONS)
     console.print(f"[green]✓[/green] [bold]{agent['name']}[/bold] — {action} [dim]{target}[/dim]")
 
-    if agent_key == "claude":
-        hook_action = _write_claude_hooks(project_root)
-        settings_path = project_root / ".claude" / "settings.json"
+    if "mcp_config" in agent:
+        mcp_action = _write_mcp_config(agent_key, project_root)
+        config_path = project_root / agent["mcp_config"]
         console.print(
-            f"[green]✓[/green] [bold]Claude Code hook + MCP[/bold] — {hook_action} "
-            f"[dim]{settings_path}[/dim]"
+            f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} "
+            f"[dim]{config_path}[/dim]"
         )
-        console.print("[dim]PreToolUse hook: relic query fires before every Read/Edit.[/dim]")
-        console.print("[dim]MCP server: relic_query tool available as native agent tool.[/dim]")
+        console.print("[dim]tools: relic_query, relic_search, relic_reindex, relic_stats[/dim]")
 
 
 def init_all_agents(project_root: Path) -> None:

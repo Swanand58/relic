@@ -4,13 +4,13 @@ Relic solves the cold-read problem in AI coding agents.
 
 Every time an agent opens a file it reads that file, then the files it imports, then the files those import — just to understand what connects to what. That's 5-10 file reads before it can start on your actual task. Every read costs tokens.
 
-Relic builds a static knowledge graph from your source code in seconds (no LLM). Before the agent touches any file, it automatically receives:
+Relic builds a static knowledge graph from your source code in seconds (no LLM). Before the agent touches any file, it calls `relic_query` and gets:
 
 - What that file exports (exact symbol names and line numbers)
-- What it imports (actual resolved paths, not guesses)
+- What it imports (resolved paths, not guesses)
 - What else in the codebase depends on it
 
-300–1200 tokens. Injected automatically via a Claude Code hook. Zero workflow change.
+300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
 ---
 
@@ -19,10 +19,10 @@ Relic builds a static knowledge graph from your source code in seconds (no LLM).
 ```
 relic init              # auto-detect subprojects → relic.yaml
 relic index             # static analysis → .knowledge/index.pkl  (seconds, no LLM)
-relic --init claude     # write CLAUDE.md + PreToolUse hook + MCP server config
+relic --init claude     # write CLAUDE.md + register MCP server in .claude/settings.json
 ```
 
-From that point, every Read or Edit fires automatically:
+Agent calls `relic_query` before touching unfamiliar code:
 
 ```
 focus: src/core/PageExtension.ts
@@ -104,27 +104,38 @@ relic index
 
 Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance. Writes `.knowledge/index.pkl` and a human-readable `.knowledge/index.toon`.
 
-Re-run after significant codebase changes.
+Re-run after significant codebase changes, or use `relic_reindex` from inside the agent session.
 
 ### 3. Wire your agent
 
 ```bash
-relic --init claude     # Claude Code   → CLAUDE.md + .claude/settings.json
-relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md
-relic --init cursor     # Cursor        → .cursorrules
-relic --init codex      # OpenAI Codex  → AGENTS.md
+relic --init claude     # Claude Code    → CLAUDE.md + .claude/settings.json
+relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md + .vscode/mcp.json
+relic --init cursor     # Cursor         → .cursorrules + .cursor/mcp.json
+relic --init codex      # OpenAI Codex   → AGENTS.md
 relic --init all        # all of the above
 ```
 
-For Claude Code this also installs a **PreToolUse hook** and registers the **relic MCP server**. The hook runs `relic query <file>` before every Read and Edit — no manual commands needed.
+Writes agent instructions and registers the relic MCP server in the right config file per agent. Re-running is safe — updates the existing block without duplicating.
 
-Re-running `--init` is safe — it updates the existing block without duplicating it.
+---
+
+## MCP tools
+
+Relic exposes four tools over MCP (stdio transport):
+
+| Tool | When to call |
+|---|---|
+| `relic_query` | Before editing unfamiliar code — returns imports, exports, neighbors, callers |
+| `relic_search` | When you don't know where a class/function/file lives |
+| `relic_reindex` | After creating, editing, or deleting source files |
+| `relic_stats` | To verify the index is fresh before a large refactor |
+
+See [docs/MCP.md](docs/MCP.md) for full tool reference and agent setup.
 
 ---
 
 ## Query context manually
-
-The hook handles this automatically, but you can also query directly:
 
 ```bash
 relic query src/core/PageExtension.ts
@@ -143,10 +154,10 @@ relic init                     # auto-discover subprojects, write relic.yaml
 relic index                    # build knowledge graph from source (no LLM)
 relic query <file|symbol>      # print TOON context subgraph to stdout
 relic query <file> --depth N   # adjust traversal depth (default 2)
-relic mcp                      # start MCP stdio server (relic_query tool)
+relic mcp                      # start MCP stdio server (4 tools)
 
 relic --list                   # list subprojects in relic.yaml
-relic --init <agent>           # write agent config + hook
+relic --init <agent>           # write agent config + MCP registration
 relic --init all               # write config for all supported agents
 relic --update                 # pull latest from GitHub main and reinstall
 relic --version                # print version
@@ -165,31 +176,17 @@ relic --version                # print version
 
 ---
 
-## MCP server
-
-Relic exposes `relic_query` as a native MCP tool. For Claude Code, `relic --init claude` registers it automatically. For other MCP-compatible agents:
-
-```json
-"mcpServers": {
-  "relic": { "command": "relic", "args": ["mcp"] }
-}
-```
-
-Agents call `relic_query` directly instead of running a shell command.
-
----
-
 ## Agentic pipelines (Blueprint, LangGraph, custom orchestrators)
 
-Relic is designed to slot into multi-agent workflows. One `relic index` call, every agent in the chain benefits.
+Relic slots into multi-agent workflows. One `relic index` call, every agent in the chain benefits.
 
 Typical integration:
-- **Orchestrator** — `relic query` to identify relevant files without reading them, scope the task cheaply
+- **Orchestrator** — `relic_query` to identify relevant files without reading them, scope the task cheaply
 - **Planning agent** — knows the dependency graph before planning, avoids plans that break callers
 - **Implementation agent** — gets exact symbol names and paths, no hallucinated imports
 - **Review agent** — sees `imported_by` edges, knows what to test beyond the changed file
 
-The MCP server is the cleanest integration point — register once, all agents in the session get `relic_query` as a native tool.
+Register once per project, all agents in the session get all four relic tools natively.
 
 ---
 
@@ -198,8 +195,8 @@ The MCP server is the cleanest integration point — register once, all agents i
 | Approach | Context per file touch |
 |---|---|
 | Agent reads file + all imports manually | 5,000–40,000 tokens |
-| `relic query` (depth=1, hook default) | 300–1,200 tokens |
-| `relic query` (depth=2) | 800–3,000 tokens |
+| `relic_query` (depth=1) | 300–1,200 tokens |
+| `relic_query` (depth=2) | 800–3,000 tokens |
 
 ---
 

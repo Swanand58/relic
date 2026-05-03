@@ -197,11 +197,19 @@ def query_cmd(
         console.print(f"[bold red]Error:[/bold red] {exc}")
         raise SystemExit(1)
 
-    # Normalise path — strip leading ./ so it matches node IDs
+    # Normalise path — try multiple forms to match node IDs.
+    # Hooks pass absolute paths; index stores relative paths from project root.
     target_norm = target.lstrip("./")
-    # Also try matching as-is and with project-relative prefix
+    candidates = [target, target_norm, str(Path(target))]
+    abs_target = Path(target)
+    if abs_target.is_absolute():
+        try:
+            candidates.append(str(abs_target.relative_to(PROJECT_ROOT)))
+        except ValueError:
+            pass
+
     node_id = None
-    for candidate in [target, target_norm, str(Path(target))]:
+    for candidate in candidates:
         if candidate in G.nodes:
             node_id = candidate
             break

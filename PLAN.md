@@ -11,43 +11,15 @@
 | TOON 38% size reduction | `feat/toon-focus-symbols` | `exports` (focus file symbols), `neighbors` (file paths), `imported_by` (inbound edges), filter edge noise |
 | README rewrite | `docs/readme-rewrite` | Cold-read problem framing, current architecture, no stale refresh docs |
 | `relic benchmark` command | `feat/benchmark` | Proves token reduction vs manual agent reads, shows hidden callers |
+| Remove Claude Code hook injection + MCP tools | `fix/remove-hook-support` | Hooks contradict the non-invasive principle. Replaced with `relic_search`, `relic_reindex`, `relic_stats` MCP tools across all agents. Adds `docs/MCP.md`. |
+| Phase 3 — ranked search, disambiguation, imperative rules | `feat/search-and-disambiguation` | Scored search (exact > prefix > substring), subproject filter, `relic search` CLI, symbol disambiguation TOON candidate list, MUST/SHOULD agent instructions with decision tree, project-specific example file injection |
+| Dogfood relic on the relic repo | `chore/dogfood-relic` | Project agent configs (CLAUDE.md, .cursorrules, AGENTS.md, copilot-instructions.md) and MCP registrations. Untracks personal `relic.yaml`/`.knowledge/`. Removes stale `_index.md`/`.gitkeep`. |
 
 ## In flight (this branch, not yet merged)
 
 | Feature | Branch | Notes |
 |---|---|---|
-| Remove Claude Code hook injection | `fix/remove-hook-support` | Hooks contradict relic's principle of being non-invasive and agent-agnostic — replaced entirely with MCP tools across all agents |
-| `relic_search` MCP tool | `fix/remove-hook-support` | Substring match over file paths and symbol names. Linear graph scan, no ranking — basic version only |
-| `relic_reindex` MCP tool | `fix/remove-hook-support` | Agent-driven freshness — rebuild index from inside the session |
-| `relic_stats` MCP tool | `fix/remove-hook-support` | Index health: file/symbol/edge counts, last_updated, subprojects, edge type breakdown |
-| `docs/MCP.md` | `fix/remove-hook-support` | Full tool reference and per-agent setup |
-
----
-
-## Phase 3 — search, disambiguation, instructions
-
-Single bundled PR. No new dependencies, no new file formats, no telemetry.
-Goal: tighten the navigation layer so agents find the right thing the first
-time and actually call the tools when they should.
-
-**`relic_search` ranking + scope filter**
-- Score: exact > prefix > substring (case-insensitive), tie-break by node degree so well-connected files surface first.
-- Add `subproject` argument so monorepo searches stay scoped. Symbol nodes inherit their defining file's subproject.
-- Output shape unchanged — same TOON tables.
-
-**`relic search <term>` CLI subcommand**
-- Shell parity for `relic_search`. Same scoring and filtering logic, lives in `relic/search.py` so CLI and MCP share one source of truth.
-- Flags: `--kind`, `--subproject`, `--limit`. Prints TOON to stdout, status to stderr (matches `relic query`).
-
-**Symbol disambiguation in `relic_query`**
-- Today `_resolve_node` returns the first symbol that matches a name and silently drops the rest — confidently wrong context when names collide.
-- Return a TOON candidate list (`name,type,file,line`) when 2+ symbols match. Agent re-queries with the full file path. Single-match behaviour unchanged.
-- Mirror in CLI `query` so the two paths stay consistent.
-
-**Sharper `RELIC_INSTRUCTIONS`**
-- Imperative MUST/SHOULD rules instead of descriptive prose.
-- Decision tree replaces the numbered workflow — every branch ends in a tool call.
-- `init_agent` substitutes the most-connected file from the index (or a `relic.yaml` subproject path as fallback) into the example block so the very first sample call points at a real file in the user's project.
+| Phase 3 polish + tests | `chore/phase-3-tests-and-polish` | 112-test pytest suite (search, toon, agent_config, MCP handlers, stats); subproject validation with available-list error; "Did you mean?" suggestions for unresolved query targets via case/style-normalized substring scoring; `relic stats` CLI subcommand sharing logic with the MCP tool; tightened MCP descriptions for `relic_query`, `relic_reindex`, `relic_stats` with imperative wording and follow-up actions |
 
 ---
 

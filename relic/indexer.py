@@ -376,6 +376,55 @@ def load_graph(knowledge_dir: Path) -> nx.DiGraph:
 # Entry point
 # ---------------------------------------------------------------------------
 
+def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
+    """Return health metrics for the loaded knowledge graph.
+
+    Single source of truth for both `relic stats` (CLI) and `relic_stats`
+    (MCP tool) so the two paths can never drift.
+
+    Keys:
+        last_updated     ISO-ish timestamp of index.pkl mtime, or "unknown"
+        files            count of file nodes
+        symbols          count of symbol nodes
+        edges            total edge count
+        edges_by_type    dict mapping edge type → count
+        subprojects      sorted list of subproject names present in the graph
+    """
+    import datetime
+
+    index_path = knowledge_dir / "index.pkl"
+    if index_path.exists():
+        last_updated = datetime.datetime.fromtimestamp(
+            index_path.stat().st_mtime
+        ).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        last_updated = "unknown"
+
+    files = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
+    symbols = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
+    edges = G.number_of_edges()
+
+    edges_by_type: dict[str, int] = {}
+    for _, _, d in G.edges(data=True):
+        et = d.get("etype", "unknown")
+        edges_by_type[et] = edges_by_type.get(et, 0) + 1
+
+    subprojects: set[str] = set()
+    for _, d in G.nodes(data=True):
+        sp = d.get("subproject", "")
+        if sp:
+            subprojects.add(sp)
+
+    return {
+        "last_updated": last_updated,
+        "files": files,
+        "symbols": symbols,
+        "edges": edges,
+        "edges_by_type": edges_by_type,
+        "subprojects": sorted(subprojects),
+    }
+
+
 def run_index(project_root: Path, knowledge_dir: Path, config_file: Path) -> nx.DiGraph:
     """Load relic.yaml, build graph, save to knowledge_dir. Returns the graph."""
     if not config_file.exists():

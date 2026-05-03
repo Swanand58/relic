@@ -154,6 +154,10 @@ relic init                     # auto-discover subprojects, write relic.yaml
 relic index                    # build knowledge graph from source (no LLM)
 relic query <file|symbol>      # print TOON context subgraph to stdout
 relic query <file> --depth N   # adjust traversal depth (default 2)
+relic search <term>            # ranked search across files and symbols
+relic search <term> -k symbol  # filter to symbols (or `file`, `all`)
+relic search <term> -s <name>  # restrict to a subproject
+relic stats                    # index health: counts, last_updated, subprojects
 relic mcp                      # start MCP stdio server (4 tools)
 
 relic --list                   # list subprojects in relic.yaml

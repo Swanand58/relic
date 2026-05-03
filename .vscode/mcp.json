@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "relic": {
+      "type": "stdio",
+      "command": "relic",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

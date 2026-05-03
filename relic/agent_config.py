@@ -71,24 +71,10 @@ what it exports, and what else in the codebase depends on it.
 ~/.local/bin/relic query src/payments/processor.py --depth 3
 ```
 
-**Check which subproject graphs are stale:**
-
-```bash
-~/.local/bin/relic --stale
-```
-
-**Refresh graph.md knowledge files** (for agents that use the markdown format):
-
-```bash
-~/.local/bin/relic --refresh
-~/.local/bin/relic --refresh payments
-```
-
 ### Knowledge graph files
 
 - Index (binary): `.knowledge/index.pkl`
 - TOON index (human-readable): `.knowledge/index.toon`
-- Subproject graph docs: `.knowledge/<subproject>/graph.md`
 
 These files are local to your machine and gitignored.
 """

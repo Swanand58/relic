@@ -15,7 +15,6 @@ Configure in any MCP-compatible agent (.claude/settings.json, cursor settings, e
 """
 
 import asyncio
-import datetime
 import time
 from pathlib import Path
 
@@ -23,8 +22,13 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from relic.indexer import load_graph, run_index
-from relic.search import render_search_toon, search_graph
+from relic.indexer import compute_stats, load_graph, run_index
+from relic.search import (
+    available_subprojects,
+    render_search_toon,
+    search_graph,
+    suggest_close_matches,
+)
 from relic.toon import candidates_to_toon, subgraph_to_toon
 
 KNOWLEDGE_DIR = Path(".knowledge")
@@ -110,7 +114,10 @@ async def list_tools() -> list[Tool]:
                 "Returns TOON: the file's imports, exported symbols, neighboring files, "
                 "and what imports this file (callers), up to `depth` hops. "
                 "Call this at the start of any edit session for an unfamiliar file — "
-                "replaces manual file reads with a ~10x token-efficient summary."
+                "replaces manual file reads with a ~10x token-efficient summary. "
+                "If the symbol name is ambiguous (matches multiple definitions), "
+                "the response is a TOON `candidates` list — re-query with the full "
+                "file path to disambiguate."
             ),
             inputSchema={
                 "type": "object",
@@ -178,9 +185,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_reindex",
             description=(
-                "Rebuild the relic knowledge graph from source code. "
-                "Call this after creating, editing, or deleting files to keep the index fresh. "
-                "Takes a few seconds. Returns updated file/symbol/edge counts."
+                "Rebuild the relic knowledge graph from source code. Call this after "
+                "creating, deleting, or moving any source file — subsequent relic_query "
+                "calls against a stale index silently return wrong context. Takes a few "
+                "seconds. Returns updated file, symbol, and edge counts."
             ),
             inputSchema={
                 "type": "object",
@@ -191,8 +199,9 @@ async def list_tools() -> list[Tool]:
             name="relic_stats",
             description=(
                 "Check knowledge graph health: files indexed, symbols, edges, "
-                "last updated timestamp, and subprojects covered. "
-                "Call this to verify the index is fresh before a large refactor."
+                "last_updated timestamp, and subprojects covered. Call this to verify "
+                "the index is fresh before a large refactor; if last_updated looks old "
+                "or files/symbols counts seem off, follow up with relic_reindex."
             ),
             inputSchema={
                 "type": "object",
@@ -233,10 +242,12 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     matches = _resolve_node(G, target)
     if not matches:
-        return [TextContent(
-            type="text",
-            text=f"Not found: '{target}'. Try relic_search to locate it, or relic_reindex if recently added.",
-        )]
+        suggestions = suggest_close_matches(G, target)
+        msg = f"Not found: '{target}'."
+        if suggestions:
+            msg += "\n\nDid you mean?\n  " + "\n  ".join(suggestions)
+        msg += "\n\nUse relic_search to explore, or relic_reindex if the file was added recently."
+        return [TextContent(type="text", text=msg)]
 
     if len(matches) > 1:
         candidates = [G.nodes[n] for n in matches]
@@ -259,6 +270,15 @@ def _handle_search(args: dict) -> list[TextContent]:
     G, err = _load_or_error(KNOWLEDGE_DIR)
     if err:
         return [TextContent(type="text", text=err)]
+
+    if subproject:
+        available = available_subprojects(G)
+        if subproject not in available:
+            avail_str = ", ".join(sorted(available)) or "(none indexed)"
+            return [TextContent(
+                type="text",
+                text=f"Error: no such subproject '{subproject}'. Available: {avail_str}.",
+            )]
 
     file_matches, symbol_matches = search_graph(
         G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
@@ -296,38 +316,17 @@ def _handle_stats() -> list[TextContent]:
     if err:
         return [TextContent(type="text", text=err)]
 
-    index_path = KNOWLEDGE_DIR / "index.pkl"
-    mtime = index_path.stat().st_mtime if index_path.exists() else None
-    last_updated = (
-        datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-        if mtime else "unknown"
-    )
-
-    file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
-    symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
-    edge_count = G.number_of_edges()
-
-    subprojects: set[str] = set()
-    for _, d in G.nodes(data=True):
-        sp = d.get("subproject", "")
-        if sp:
-            subprojects.add(sp)
-
-    edge_types: dict[str, int] = {}
-    for _, _, d in G.edges(data=True):
-        et = d.get("etype", "unknown")
-        edge_types[et] = edge_types.get(et, 0) + 1
-
+    stats = compute_stats(G, KNOWLEDGE_DIR)
     lines = [
-        f"last_updated: {last_updated}",
-        f"files: {file_count}",
-        f"symbols: {symbol_count}",
-        f"edges: {edge_count}",
+        f"last_updated: {stats['last_updated']}",
+        f"files: {stats['files']}",
+        f"symbols: {stats['symbols']}",
+        f"edges: {stats['edges']}",
     ]
-    for et, count in sorted(edge_types.items()):
+    for et, count in sorted(stats["edges_by_type"].items()):
         lines.append(f"  {et}: {count}")
-    if subprojects:
-        lines.append(f"subprojects: {', '.join(sorted(subprojects))}")
+    if stats["subprojects"]:
+        lines.append(f"subprojects: {', '.join(stats['subprojects'])}")
 
     return [TextContent(type="text", text="\n".join(lines))]
 

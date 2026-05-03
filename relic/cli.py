@@ -14,9 +14,14 @@ from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.benchmark import run_benchmark
 from relic.discovery import discover_subprojects
-from relic.indexer import load_graph, run_index
+from relic.indexer import compute_stats, load_graph, run_index
 from relic.mcp_server import run as run_mcp
-from relic.search import render_search_toon, search_graph
+from relic.search import (
+    available_subprojects,
+    render_search_toon,
+    search_graph,
+    suggest_close_matches,
+)
 from relic.toon import candidates_to_toon, full_index_to_toon, subgraph_to_toon
 
 app = typer.Typer(
@@ -195,7 +200,16 @@ def query_cmd(
             if d.get("ntype") == "symbol" and d.get("name") == target
         ]
         if not symbol_matches:
-            console.print(f"[bold red]Not found:[/bold red] '{target}' not in index. Run `relic index` first.")
+            console.print(f"[bold red]Not found:[/bold red] '{target}' not in index.")
+            suggestions = suggest_close_matches(G, target)
+            if suggestions:
+                console.print("[dim]Did you mean?[/dim]")
+                for s in suggestions:
+                    console.print(f"  [cyan]{s}[/cyan]")
+            console.print(
+                "[dim]Use `relic search <name>` to explore, "
+                "or `relic index` if the file was added recently.[/dim]"
+            )
             raise SystemExit(1)
         if len(symbol_matches) > 1:
             cand_data = [G.nodes[n] for n in symbol_matches]
@@ -272,6 +286,16 @@ def search_cmd(
         console.print(f"[bold red]Error:[/bold red] {exc}")
         raise SystemExit(1)
 
+    if subproject:
+        available = available_subprojects(G)
+        if subproject not in available:
+            avail_str = ", ".join(sorted(available)) or "(none indexed)"
+            console.print(
+                f"[bold red]Error:[/bold red] no such subproject {subproject!r}. "
+                f"Available: {avail_str}."
+            )
+            raise SystemExit(1)
+
     file_matches, symbol_matches = search_graph(
         G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
     )
@@ -284,6 +308,35 @@ def search_cmd(
         + (f" | subproject={subproject}" if subproject else "")
         + "[/dim]"
     )
+
+
+@app.command(name="stats")
+def stats_cmd() -> None:
+    """Print health metrics for the knowledge graph.
+
+    Shares logic with the `relic_stats` MCP tool — same numbers, different
+    display. Use this to confirm the index is fresh before a large refactor.
+    """
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise SystemExit(1)
+
+    stats = compute_stats(G, KNOWLEDGE_DIR)
+
+    table = Table(title="Knowledge Graph Stats", show_lines=True)
+    table.add_column("Metric")
+    table.add_column("Value", style="cyan")
+    table.add_row("last_updated", stats["last_updated"])
+    table.add_row("files", str(stats["files"]))
+    table.add_row("symbols", str(stats["symbols"]))
+    table.add_row("edges", str(stats["edges"]))
+    for et, count in sorted(stats["edges_by_type"].items()):
+        table.add_row(f"  {et}", str(count))
+    if stats["subprojects"]:
+        table.add_row("subprojects", ", ".join(stats["subprojects"]))
+    console.print(table)
 
 
 @app.command(name="mcp")

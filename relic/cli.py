@@ -12,6 +12,7 @@ from rich.table import Table
 
 from relic import __version__
 from relic.agent_config import AGENTS, init_agent, init_all_agents
+from relic.benchmark import run_benchmark
 from relic.discovery import discover_subprojects
 from relic.indexer import load_graph, run_index
 from relic.mcp_server import run as run_mcp
@@ -245,6 +246,19 @@ def mcp_cmd() -> None:
         "mcpServers": { "relic": { "command": "relic", "args": ["mcp"] } }
     """
     run_mcp()
+
+
+@app.command(name="benchmark")
+def benchmark_cmd(
+    target: str = typer.Argument(..., help="File path to benchmark.", metavar="FILE"),
+    depth: int = typer.Option(1, "--depth", "-d", help="Graph traversal depth (default 1, matches hook)."),
+) -> None:
+    """Compare token cost of agent context with vs without relic.
+
+    Shows files an agent would read manually, tokens saved by TOON injection,
+    and hidden callers it would miss entirely. Run this to prove relic's value.
+    """
+    run_benchmark(target, PROJECT_ROOT, KNOWLEDGE_DIR, depth=depth)
 
 
 @app.callback(invoke_without_command=True)

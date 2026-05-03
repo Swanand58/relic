@@ -19,8 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich.console import Console
-from rich.table import Table
 
+from relic import style
 from relic.indexer import LANGUAGE_MAP, MAX_FILE_BYTES, SKIP_DIRS
 
 # Show this many examples per skip reason in the rendered report.
@@ -131,19 +131,23 @@ def render_coverage(coverage: dict, console: Console, verbose: bool = False) -> 
     total_seen = sum(totals.values())
     coverage_pct = (totals["indexed"] / total_seen * 100) if total_seen else 100.0
 
-    summary = Table(title="Coverage", show_lines=True)
-    summary.add_column("Metric")
-    summary.add_column("Count", justify="right", style="cyan")
-    summary.add_row("Files indexed", str(totals["indexed"]))
-    summary.add_row("Skipped (no parser)", str(totals["no_parser"]))
-    summary.add_row(f"Skipped (>{MAX_FILE_BYTES // 1000} KB)", str(totals["too_large"]))
-    summary.add_row("Skipped (symlinks)", str(totals["symlink"]))
-    summary.add_row("Coverage %", f"{coverage_pct:.1f}")
-    console.print(summary)
+    console.print(style.header("coverage"))
+    console.print()
+    kw = 22  # widest key here is "Skipped (no parser)" at 19 chars
+    console.print(style.kv("Files indexed", totals["indexed"], key_width=kw))
+    console.print(style.kv("Skipped (no parser)", totals["no_parser"], key_width=kw))
+    console.print(style.kv(
+        f"Skipped (>{MAX_FILE_BYTES // 1000} KB)", totals["too_large"], key_width=kw,
+    ))
+    console.print(style.kv("Skipped (symlinks)", totals["symlink"], key_width=kw))
+    console.print(style.kv("Coverage %", f"{coverage_pct:.1f}", key_width=kw))
 
     for name, entry in coverage["subprojects"].items():
         if entry["missing"]:
-            console.print(f"\n[bold yellow]{name}[/bold yellow]: path missing — skipped.")
+            console.print()
+            console.print(style.warn(
+                f"[bold {style.WARN}]{name}[/]: path missing — skipped."
+            ))
             continue
 
         skipped = entry["skipped"]
@@ -155,12 +159,13 @@ def render_coverage(coverage: dict, console: Console, verbose: bool = False) -> 
             len(entry["indexed"]) + len(no_parser) + len(too_large) + len(symlink)
         )
 
+        console.print()
         console.print(
-            f"\n[bold]{name}[/bold]  "
-            f"[cyan]{len(entry['indexed'])}[/cyan]/{sub_total} indexed  "
-            f"[dim]({len(no_parser)} no_parser, "
+            f"[bold {style.SECONDARY}]{name}[/]  "
+            f"[bold {style.FG}]{len(entry['indexed'])}[/][{style.DIM}]/{sub_total} indexed[/]  "
+            f"[{style.DIM}]({len(no_parser)} no_parser, "
             f"{len(too_large)} too_large, "
-            f"{len(symlink)} symlinks)[/dim]"
+            f"{len(symlink)} symlinks)[/]"
         )
 
         _render_bucket(console, "Skipped (no parser)", no_parser, verbose)
@@ -178,8 +183,10 @@ def _render_bucket(console: Console, title: str, items: list[str], verbose: bool
     if not items:
         return
     visible = items if verbose else items[:_EXAMPLE_LIMIT]
-    console.print(f"  [dim]{title}:[/dim]")
+    console.print(f"   [{style.DIM}]{title}:[/]")
     for item in visible:
-        console.print(f"    {item}")
+        console.print(f"     [{style.FG}]{item}[/]")
     if not verbose and len(items) > _EXAMPLE_LIMIT:
-        console.print(f"    [dim]… and {len(items) - _EXAMPLE_LIMIT} more (use --verbose)[/dim]")
+        console.print(
+            f"     [{style.DIM}]… and {len(items) - _EXAMPLE_LIMIT} more (use --verbose)[/]"
+        )

@@ -1,4 +1,9 @@
-"""Relic CLI — entry point for all commands."""
+"""Relic CLI — entry point for all commands.
+
+Visual style is centralised in `relic.style`: any header, success/error glyph,
+table layout, or spinner pulse comes from there. Touch `style.py` to retheme
+the whole tool.
+"""
 
 import subprocess
 from pathlib import Path
@@ -6,11 +11,8 @@ from typing import Optional
 
 import typer
 import yaml
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.table import Table
 
-from relic import __version__
+from relic import __version__, style
 from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
@@ -23,6 +25,7 @@ from relic.search import (
     search_graph,
     suggest_close_matches,
 )
+from relic.style import console, err_console
 from relic.toon import candidates_to_toon, full_index_to_toon, subgraph_to_toon
 from relic.watcher import run_watch
 
@@ -32,10 +35,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
-console = Console()
-err_console = Console(stderr=True)
 
-# Paths resolved relative to the working directory where relic is invoked.
 CONFIG_FILE = Path("relic.yaml")
 KNOWLEDGE_DIR = Path(".knowledge")
 PROJECT_ROOT = Path.cwd()
@@ -47,24 +47,22 @@ def _load_config() -> dict:
     Exits with an error message if the file is missing or malformed.
     """
     if not CONFIG_FILE.exists():
-        console.print(
-            f"[bold red]Error:[/bold red] {CONFIG_FILE} not found. "
-            "Create one in the project root to use relic."
-        )
+        console.print(style.error(
+            f"{CONFIG_FILE} not found. Create one in the project root to use relic."
+        ))
         raise SystemExit(1)
     try:
         with CONFIG_FILE.open(encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh)
     except yaml.YAMLError as exc:
-        console.print(f"[bold red]Error parsing {CONFIG_FILE}:[/bold red] {exc}")
+        console.print(style.error(f"failed to parse {CONFIG_FILE}: {exc}"))
         raise SystemExit(1)
 
     if not cfg or "subprojects" not in cfg:
-        console.print(f"[bold red]Error:[/bold red] {CONFIG_FILE} must contain a 'subprojects' key.")
+        console.print(style.error(f"{CONFIG_FILE} must contain a 'subprojects' key."))
         raise SystemExit(1)
 
     return cfg
-
 
 
 def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
@@ -76,50 +74,58 @@ def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
         block = "\n# relic\n" + "\n".join(additions) + "\n"
         with gitignore.open("a", encoding="utf-8") as f:
             f.write(block)
-        console.print(f"[dim]Added to .gitignore: {', '.join(additions)}[/dim]")
+        console.print(style.dim(f"   added to .gitignore: {', '.join(additions)}"))
 
 
 @app.command(name="init")
 def project_init() -> None:
     """Auto-discover subprojects and generate relic.yaml. Adds relic entries to .gitignore."""
     if CONFIG_FILE.exists():
-        console.print(
-            f"[yellow]relic.yaml already exists.[/yellow] Delete it first to re-initialise."
-        )
+        console.print(style.warn(
+            f"{CONFIG_FILE} already exists — delete it first to re-initialise."
+        ))
         raise SystemExit(1)
 
-    console.print("[bold cyan]Discovering subprojects…[/bold cyan]")
-    subprojects = discover_subprojects(PROJECT_ROOT)
+    console.print(style.header("init"))
+    console.print()
+
+    with style.make_spinner("discovering subprojects…") as spinner:
+        spinner.add_task("", total=None)
+        subprojects = discover_subprojects(PROJECT_ROOT)
 
     if not subprojects:
-        console.print(
-            "[bold red]No subprojects found.[/bold red] "
-            "Create relic.yaml manually and define your subprojects."
-        )
+        console.print(style.error(
+            "no subprojects found. Create relic.yaml manually and define your subprojects."
+        ))
         raise SystemExit(1)
 
-    # Write relic.yaml
     config = {"subprojects": subprojects}
     with CONFIG_FILE.open("w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-    # Show what was found
-    table = Table(title="Discovered Subprojects", show_lines=True)
-    table.add_column("Name", style="bold cyan")
-    table.add_column("Path")
-    table.add_column("Description")
+    table = style.make_table()
+    table.add_column("name", style=f"bold {style.SECONDARY}")
+    table.add_column("path")
+    table.add_column("description", style=style.DIM)
     for name, info in subprojects.items():
         table.add_row(name, info["path"], info["description"])
     console.print(table)
 
-    # Gitignore relic artifacts — relic.yaml is personal config, not project config
     _add_to_gitignore(PROJECT_ROOT, ["relic.yaml", ".knowledge/"])
 
-    console.print(f"\n[green]✓[/green] [bold]relic.yaml[/bold] created with {len(subprojects)} subproject(s).")
-    console.print("[dim]relic.yaml and .knowledge/ added to .gitignore — these are local to your machine.[/dim]")
-    console.print("\nNext steps:")
-    console.print("  [cyan]relic --init claude[/cyan]   — set up Claude Code integration")
-    console.print("  [cyan]relic index[/cyan]            — build knowledge graph from source")
+    console.print()
+    console.print(style.success(
+        f"[bold]{CONFIG_FILE}[/] created with {len(subprojects)} subproject(s)"
+    ))
+    console.print(style.dim(
+        "   relic.yaml and .knowledge/ are personal — gitignored."
+    ))
+    console.print()
+    console.print(style.dim("next:"))
+    arrow = style.ARROW
+    sec = style.SECONDARY
+    console.print(f"   {arrow}  [bold {sec}]relic --init claude[/]   set up Claude Code")
+    console.print(f"   {arrow}  [bold {sec}]relic index[/]            build the knowledge graph")
 
 
 @app.command(name="index")
@@ -129,36 +135,31 @@ def index_cmd() -> None:
     No LLM involved. Writes .knowledge/index.pkl (NetworkX graph).
     Run this after relic init, and again whenever the codebase changes significantly.
     """
+    console.print(style.header("index"))
+    console.print()
+
     try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold cyan]Indexing codebase…[/bold cyan]"),
-            console=console,
-            transient=True,
-        ) as progress:
-            progress.add_task("", total=None)
+        with style.make_spinner("indexing codebase…") as spinner:
+            spinner.add_task("", total=None)
             G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, CONFIG_FILE)
     except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
+        console.print(style.error(str(exc)))
         raise SystemExit(1)
 
     file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
     edge_count = G.number_of_edges()
 
-    table = Table(title="Index Summary", show_lines=True)
-    table.add_column("Metric")
-    table.add_column("Count", justify="right", style="cyan")
-    table.add_row("Files indexed", str(file_count))
-    table.add_row("Symbols extracted", str(symbol_count))
-    table.add_row("Edges (imports/defines/extends)", str(edge_count))
-    console.print(table)
-    console.print(f"\n[green]✓[/green] Index saved to [dim]{KNOWLEDGE_DIR / 'index.pkl'}[/dim]")
+    console.print(style.kv("files", file_count))
+    console.print(style.kv("symbols", symbol_count))
+    console.print(style.kv("edges", edge_count))
+    console.print()
 
-    # Also write full TOON index for human inspection
     toon_path = KNOWLEDGE_DIR / "index.toon"
     toon_path.write_text(full_index_to_toon(G), encoding="utf-8")
-    console.print(f"[green]✓[/green] TOON index saved to [dim]{toon_path}[/dim]")
+
+    console.print(style.success(f"saved   {style.dim(str(KNOWLEDGE_DIR / 'index.pkl'))}"))
+    console.print(style.success(f"toon    {style.dim(str(toon_path))}"))
 
 
 @app.command(name="query")
@@ -174,11 +175,9 @@ def query_cmd(
     try:
         G = load_graph(KNOWLEDGE_DIR)
     except FileNotFoundError as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
+        console.print(style.error(str(exc)))
         raise SystemExit(1)
 
-    # Normalise path — try multiple forms to match node IDs.
-    # Users may pass relative or absolute paths from any cwd inside the project.
     target_norm = target.lstrip("./")
     path_candidates = [target, target_norm, str(Path(target))]
     abs_target = Path(target)
@@ -194,36 +193,33 @@ def query_cmd(
             node_id = candidate
             break
 
-    # If not found as file, try as symbol name — collect all matches so we
-    # can render a disambiguation list when the name is overloaded.
     if node_id is None:
         symbol_matches = [
             n for n, d in G.nodes(data=True)
             if d.get("ntype") == "symbol" and d.get("name") == target
         ]
         if not symbol_matches:
-            console.print(f"[bold red]Not found:[/bold red] '{target}' not in index.")
+            console.print(style.error(f"not found: '{target}'"))
             suggestions = suggest_close_matches(G, target)
             if suggestions:
-                console.print("[dim]Did you mean?[/dim]")
+                console.print(style.dim("   did you mean?"))
                 for s in suggestions:
-                    console.print(f"  [cyan]{s}[/cyan]")
-            console.print(
-                "[dim]Use `relic search <name>` to explore, "
-                "or `relic index` if the file was added recently.[/dim]"
-            )
+                    console.print(f"      [bold {style.SECONDARY}]{s}[/]")
+            console.print(style.dim(
+                "   try `relic search <name>` to explore, "
+                "or `relic index` if the file was added recently."
+            ))
             raise SystemExit(1)
         if len(symbol_matches) > 1:
             cand_data = [G.nodes[n] for n in symbol_matches]
             print(candidates_to_toon(target, cand_data))
-            err_console.print(
-                f"[dim]ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
-                f"re-run with the file path to scope the query[/dim]"
-            )
+            err_console.print(style.dim(
+                f"ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
+                f"re-run with the file path to scope the query"
+            ))
             return
         node_id = symbol_matches[0]
 
-    # BFS traversal up to `depth` hops (both directions)
     neighbours = {node_id}
     frontier = {node_id}
     for _ in range(depth):
@@ -237,7 +233,6 @@ def query_cmd(
 
     subgraph = G.subgraph(neighbours)
 
-    # Collect typed lists
     file_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "file"]
     symbol_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "symbol"]
     import_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "imports"]
@@ -253,13 +248,12 @@ def query_cmd(
         extends_edges=extends_edges,
     )
 
-    # Stdout — agent reads this directly
     print(toon)
 
-    # Status — goes to stderr so it doesn't pollute stdout
-    err_console.print(
-        f"[dim]query: {node_id} | {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}[/dim]"
-    )
+    err_console.print(style.dim(
+        f"query: {node_id} {style.DOT} {len(file_nodes)} files, "
+        f"{len(symbol_nodes)} symbols, depth={depth}"
+    ))
 
 
 @app.command(name="search")
@@ -279,23 +273,22 @@ def search_cmd(
     MCP tool.
     """
     if kind not in ("file", "symbol", "all"):
-        console.print(f"[bold red]Invalid --kind:[/bold red] {kind!r}. Choose file, symbol, or all.")
+        console.print(style.error(f"invalid --kind: {kind!r}. choose file, symbol, or all."))
         raise SystemExit(1)
 
     try:
         G = load_graph(KNOWLEDGE_DIR)
     except FileNotFoundError as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
+        console.print(style.error(str(exc)))
         raise SystemExit(1)
 
     if subproject:
         available = available_subprojects(G)
         if subproject not in available:
             avail_str = ", ".join(sorted(available)) or "(none indexed)"
-            console.print(
-                f"[bold red]Error:[/bold red] no such subproject {subproject!r}. "
-                f"Available: {avail_str}."
-            )
+            console.print(style.error(
+                f"no such subproject {subproject!r}. available: {avail_str}."
+            ))
             raise SystemExit(1)
 
     file_matches, symbol_matches = search_graph(
@@ -304,12 +297,12 @@ def search_cmd(
 
     print(render_search_toon(query, file_matches, symbol_matches))
 
-    err_console.print(
-        f"[dim]search: '{query}' | "
+    suffix = f" {style.DOT} subproject={subproject}" if subproject else ""
+    err_console.print(style.dim(
+        f"search: '{query}' {style.DOT} "
         f"{len(file_matches)} file(s), {len(symbol_matches)} symbol(s)"
-        + (f" | subproject={subproject}" if subproject else "")
-        + "[/dim]"
-    )
+        f"{suffix}"
+    ))
 
 
 @app.command(name="stats")
@@ -322,23 +315,21 @@ def stats_cmd() -> None:
     try:
         G = load_graph(KNOWLEDGE_DIR)
     except FileNotFoundError as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
+        console.print(style.error(str(exc)))
         raise SystemExit(1)
 
     stats = compute_stats(G, KNOWLEDGE_DIR)
 
-    table = Table(title="Knowledge Graph Stats", show_lines=True)
-    table.add_column("Metric")
-    table.add_column("Value", style="cyan")
-    table.add_row("last_updated", stats["last_updated"])
-    table.add_row("files", str(stats["files"]))
-    table.add_row("symbols", str(stats["symbols"]))
-    table.add_row("edges", str(stats["edges"]))
+    console.print(style.header("stats"))
+    console.print()
+    console.print(style.kv("last_updated", stats["last_updated"]))
+    console.print(style.kv("files", stats["files"]))
+    console.print(style.kv("symbols", stats["symbols"]))
+    console.print(style.kv("edges", stats["edges"]))
     for et, count in sorted(stats["edges_by_type"].items()):
-        table.add_row(f"  {et}", str(count))
+        console.print(style.kv(f"  {et}", count))
     if stats["subprojects"]:
-        table.add_row("subprojects", ", ".join(stats["subprojects"]))
-    console.print(table)
+        console.print(style.kv("subprojects", ", ".join(stats["subprojects"])))
 
 
 @app.command(name="watch")
@@ -355,14 +346,12 @@ def watch_cmd(
     not polling. Press Ctrl+C to stop.
     """
     if not CONFIG_FILE.exists():
-        console.print(
-            f"[bold red]Error:[/bold red] {CONFIG_FILE} not found. Run `relic init` first."
-        )
+        console.print(style.error(f"{CONFIG_FILE} not found. run `relic init` first."))
         raise SystemExit(1)
     if not (KNOWLEDGE_DIR / "index.pkl").exists():
-        console.print(
-            "[bold red]Error:[/bold red] no index found. Run `relic index` once before `relic watch`."
-        )
+        console.print(style.error(
+            "no index found. run `relic index` once before `relic watch`."
+        ))
         raise SystemExit(1)
 
     try:
@@ -373,7 +362,7 @@ def watch_cmd(
             debounce_seconds=max(0.05, debounce_ms / 1000),
         )
     except (FileNotFoundError, ValueError) as exc:
-        console.print(f"[bold red]Error:[/bold red] {exc}")
+        console.print(style.error(str(exc)))
         raise SystemExit(1)
 
 
@@ -430,7 +419,7 @@ def main(
 ) -> None:
     """Relic — build and query a static knowledge graph for AI coding agents."""
     if version:
-        console.print(f"relic {__version__}")
+        console.print(style.banner(__version__))
         return
 
     if init is not None:
@@ -439,15 +428,15 @@ def main(
         elif init in AGENTS:
             init_agent(init, PROJECT_ROOT)
         else:
-            console.print(
-                f"[bold red]Unknown agent:[/bold red] '{init}'\n"
-                f"Choose from: {', '.join(AGENTS)} or 'all'"
-            )
+            console.print(style.error(
+                f"unknown agent: '{init}' — choose from {', '.join(AGENTS)} or 'all'"
+            ))
             raise SystemExit(1)
         return
 
     if update:
-        console.print("[bold cyan]Updating relic from main…[/bold cyan]")
+        console.print(style.header("update"))
+        console.print(style.dim("   pulling latest from main…\n"))
         result = subprocess.run(
             [
                 "uv", "tool", "install",
@@ -457,28 +446,25 @@ def main(
             text=True,
         )
         if result.returncode != 0:
-            console.print("[bold red]Update failed.[/bold red] Is uv installed and on PATH?")
+            console.print(style.error("update failed — is uv installed and on PATH?"))
             raise SystemExit(result.returncode)
-        console.print("[bold green]relic updated.[/bold green]")
+        console.print(style.success("relic updated"))
         return
 
-    # Subcommands (init, index, query, mcp) are routed by Click before this callback.
     if ctx.invoked_subcommand is not None:
         return
 
     cfg = _load_config()
     all_subprojects: dict = cfg["subprojects"]
 
-    # --list
     if list_all:
-        table = Table(title="Subprojects", show_lines=True)
-        table.add_column("Name", style="bold cyan")
-        table.add_column("Path")
-        table.add_column("Description")
+        table = style.make_table(title="subprojects")
+        table.add_column("name", style=f"bold {style.SECONDARY}")
+        table.add_column("path")
+        table.add_column("description", style=style.DIM)
         for name, info in all_subprojects.items():
             table.add_row(name, info.get("path", ""), info.get("description", ""))
         console.print(table)
         return
 
-    # no args — typer prints help automatically via no_args_is_help=True
     console.print(ctx.get_help())

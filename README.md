@@ -12,6 +12,8 @@ Relic builds a static knowledge graph from your source code in seconds (no LLM).
 
 300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
+Relic also measures its own cost. `relic audit` shows exactly what relic adds to your agent's context (instructions block + MCP tool schemas) and proves it's a fraction of what it saves. No "trust us" — verifiable per project.
+
 ---
 
 ## How it works
@@ -166,6 +168,40 @@ relic coverage --verbose    # list every skipped file
 
 Shows the count and identity of files that were indexed vs silently dropped, classified by reason: `no_parser` (extension not supported), `too_large` (over 200 KB), `symlink` (skipped for safety). Use this when a query unexpectedly comes back empty — it tells you whether the file is a tool limit instead of a model error.
 
+## Verify relic's own cost
+
+```bash
+relic audit
+```
+
+Shows three numbers: the instructions block written to `CLAUDE.md` / `.cursorrules` / `AGENTS.md`, the MCP tool schemas the agent loads every turn, and a sample `relic_query` against your real graph.
+
+```
+⬢  audit
+   instructions block     ~651 tokens   CLAUDE.md / .cursorrules / AGENTS.md
+   mcp tool schemas       ~365 tokens   4 tools, every turn
+   ─────────────────────────────────
+   baseline tax / turn  ~1,016 tokens
+
+   sample query · src/core/PageExtension.ts · depth=2
+   relic_query response  ~5,627 tokens
+   manual baseline      ~27,952 tokens
+   net savings          ~22,325 tokens (80%)
+
+✓ baseline tax under 1,500 tokens — within healthy range
+```
+
+Background: 90-day instrumentation of Claude Code sessions found that 73% of tokens go to invisible chrome (CLAUDE.md bloat, MCP schemas, hooks, skills) before the agent reads a single user message. Relic's pitch is "save tokens" — it would be dishonest if relic itself were part of the problem. CI guards keep the instructions block under 800 tokens and the MCP schemas under 500 tokens. Loosening either is a deliberate decision, not a drift.
+
+## Benchmark token savings on a real file
+
+```bash
+relic benchmark src/core/PageExtension.ts
+relic benchmark src/core/PageExtension.ts --depth 2
+```
+
+For a single target file, prints what an agent would read manually (target file + every direct import), what relic provides instead (one TOON subgraph + the target file), and the resulting savings. Also surfaces the `imported_by` callers — files an agent has no way to discover from the file alone.
+
 ---
 
 ## Commands
@@ -183,6 +219,8 @@ relic watch                    # rebuild index automatically on file changes
 relic watch --debounce-ms 200  # tighter debounce window (default 500 ms)
 relic coverage                 # what's indexed vs skipped, with reasons
 relic coverage -v              # list every skipped file (not just samples)
+relic audit                    # measure relic's own token footprint
+relic benchmark <file>         # compare token cost of context with vs without relic
 relic mcp                      # start MCP stdio server (4 tools)
 
 relic --list                   # list subprojects in relic.yaml
@@ -231,12 +269,14 @@ Register once per project, all agents in the session get all four relic tools na
 
 ## Security
 
+**Static analysis only** — relic never executes your source. Python is parsed with `ast.parse` (parse-only, no eval); TypeScript and JavaScript are matched with regex. Reading a malicious repo cannot run code through relic.
+
 **Path traversal prevention** — subproject paths in `relic.yaml` are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected.
 
-**Symlink blocking** — relic skips all symlinks when walking directories.
+**Symlinks skipped** — the indexer ignores all symbolic links during traversal, so a malicious symlink pointing outside the project cannot pull foreign files into the graph. Same rule applies to `relic watch` and `relic coverage`.
 
-**CLI argument sanitisation** — the query target is validated before shell execution.
+**File size limit** — skips files over 200 KB. Bounds per-file work and prevents a single bloated file from dominating the index.
 
-**File size limits** — skips files over 200 KB, caps at 500 files per subproject.
+**No filesystem writes outside the project** — relic only writes to `.knowledge/` and (when explicitly invoked) `relic.yaml`, `.gitignore`, and the agent config files you ask it to update.
 
-**No external calls** — no API calls, no telemetry. Code never leaves your machine. `--update` passes only the hardcoded `github.com/Swanand58/relic@main` URL to uv.
+**No external calls** — no API calls, no telemetry. Code never leaves your machine. The single network call relic ever makes is `relic --update`, which passes only the hardcoded `github.com/Swanand58/relic@main` URL to `uv tool install` for self-reinstall.

@@ -191,3 +191,53 @@ class TestToolDescriptions:
         desc = tools["relic_stats"].description.lower()
         # description should chain to relic_reindex when the index is old
         assert "relic_reindex" in desc
+
+
+# ---------------------------------------------------------------------------
+# Cache stability — list_tools() output must be byte-identical across calls
+# and across cwds. Anthropic's prompt cache (and any other LLM cache layer)
+# invalidates on a single byte changing in the system prompt. If our tool
+# definitions silently embedded a timestamp, project name, or counter, every
+# turn would miss the cache and pay full price for ~360 tokens.
+# ---------------------------------------------------------------------------
+
+class TestToolDefinitionStability:
+    def _serialize(self):
+        tools = asyncio.run(list_tools())
+        # Serialise the parts an LLM would actually see: name, description,
+        # and inputSchema. Reduces noise from non-payload Tool fields.
+        return [
+            (t.name, t.description, str(t.inputSchema))
+            for t in tools
+        ]
+
+    def test_two_calls_produce_identical_output(self):
+        first = self._serialize()
+        second = self._serialize()
+        assert first == second
+
+    def test_cwd_does_not_leak_into_definitions(self, tmp_path: Path, monkeypatch):
+        # Move into an empty tmp dir, snapshot the tools, move into the
+        # real project, snapshot again. They must match — anything that
+        # changes here would silently invalidate the LLM's prompt cache
+        # for every relic-enabled session.
+        monkeypatch.chdir(tmp_path)
+        from_empty = self._serialize()
+        repo_root = Path(__file__).resolve().parent.parent
+        monkeypatch.chdir(repo_root)
+        from_repo = self._serialize()
+        assert from_empty == from_repo
+
+    def test_no_dynamic_content_in_descriptions(self):
+        # Belt-and-braces: scan each description for known leaky patterns.
+        import re
+        suspicious = re.compile(
+            r"(\d{4}-\d{2}-\d{2})|"   # timestamp
+            r"(/Users/|/home/|C:\\)|"  # absolute path
+            r"\b\d{2}:\d{2}:\d{2}\b"   # clock time
+        )
+        tools = asyncio.run(list_tools())
+        for t in tools:
+            assert not suspicious.search(t.description or ""), (
+                f"{t.name} description contains dynamic content — breaks prompt cache."
+            )

@@ -110,31 +110,21 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_query",
             description=(
-                "Get dependency context for a file or symbol before editing it. "
-                "Returns TOON: the file's imports, exported symbols, neighboring files, "
-                "and what imports this file (callers), up to `depth` hops. "
-                "Call this at the start of any edit session for an unfamiliar file — "
-                "replaces manual file reads with a ~10x token-efficient summary. "
-                "If the symbol name is ambiguous (matches multiple definitions), "
-                "the response is a TOON `candidates` list — re-query with the full "
-                "file path to disambiguate."
+                "TOON dependency context for a file or symbol: imports, exports, "
+                "neighbors, callers (up to `depth` hops). Call before editing any "
+                "unfamiliar file. Ambiguous symbol → TOON candidates list; "
+                "re-query with the full file path."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": (
-                            "File path (e.g. src/payments/processor.py) "
-                            "or symbol name (e.g. PaymentProcessor)"
-                        ),
+                        "description": "File path or symbol name.",
                     },
                     "depth": {
                         "type": "integer",
-                        "description": (
-                            "BFS hops from target node (default 2). "
-                            "Use depth=1 for barrel/index files to avoid loading the entire subproject."
-                        ),
+                        "description": "BFS hops (default 2; use 1 for barrel files).",
                         "default": 2,
                     },
                 },
@@ -144,38 +134,30 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_search",
             description=(
-                "Search for files and symbols across the knowledge graph by name. "
-                "Use this when you don't know where something lives — "
-                "pass a class name, function name, or partial file path. "
-                "Results are ranked: exact > prefix > substring, with well-connected "
-                "nodes surfacing first on ties. Returns TOON."
+                "Ranked search for files and symbols by name. Use when you don't "
+                "know where something lives. Order: exact > prefix > substring, "
+                "well-connected nodes first on ties. Returns TOON."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": (
-                            "Search term — partial file path or symbol name "
-                            "(case-insensitive)"
-                        ),
+                        "description": "File path or symbol name (case-insensitive).",
                     },
                     "kind": {
                         "type": "string",
-                        "description": "Filter results: 'file', 'symbol', or 'all' (default 'all')",
+                        "description": "Filter: file, symbol, or all.",
                         "enum": ["file", "symbol", "all"],
                         "default": "all",
                     },
                     "subproject": {
                         "type": "string",
-                        "description": (
-                            "Restrict results to a single subproject (as named in "
-                            "relic.yaml). Useful in monorepos to avoid cross-subproject noise."
-                        ),
+                        "description": "Restrict to one subproject from relic.yaml.",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Max results per category (default 20)",
+                        "description": "Max results per category.",
                         "default": 20,
                     },
                 },
@@ -185,10 +167,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_reindex",
             description=(
-                "Rebuild the relic knowledge graph from source code. Call this after "
-                "creating, deleting, or moving any source file — subsequent relic_query "
-                "calls against a stale index silently return wrong context. Takes a few "
-                "seconds. Returns updated file, symbol, and edge counts."
+                "Rebuild the knowledge graph from source. Call after creating, "
+                "deleting, or moving files — stale queries return wrong context. "
+                "Returns file, symbol, and edge counts."
             ),
             inputSchema={
                 "type": "object",
@@ -198,10 +179,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_stats",
             description=(
-                "Check knowledge graph health: files indexed, symbols, edges, "
-                "last_updated timestamp, and subprojects covered. Call this to verify "
-                "the index is fresh before a large refactor; if last_updated looks old "
-                "or files/symbols counts seem off, follow up with relic_reindex."
+                "Index health: files, symbols, edges, last_updated, subprojects. "
+                "Call before a large refactor; relic_reindex if last_updated is old."
             ),
             inputSchema={
                 "type": "object",

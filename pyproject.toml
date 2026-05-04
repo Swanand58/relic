@@ -11,7 +11,7 @@ dependencies = [
     "mcp>=1.0.0",
     "networkx>=3.3",
     "PyYAML>=6.0.3",
-    "rich>=13.7.0",
+    "rich>=15.0.0",
     "typer>=0.25.1",
     "watchdog>=6.0.0",
 ]

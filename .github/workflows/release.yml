@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
+  check-version:
+    name: version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+      - name: Verify tag matches pyproject.toml
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PKG=$(uv run python -c "
+          import tomllib, pathlib
+          d = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+          print(d['project']['version'])
+          ")
+          echo "Tag version:    $TAG"
+          echo "Package version: $PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match pyproject.toml version $PKG"
+            exit 1
+          fi
+
+  release:
+    name: github release
+    runs-on: ubuntu-latest
+    needs: [ci, check-version]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          # Extract the section between ## [TAG] and the next ## [
+          BODY=$(awk -v ver="$TAG" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          if [ -z "$BODY" ]; then
+            BODY="Release v${TAG} — see [CHANGELOG.md](CHANGELOG.md) for details."
+          fi
+
+          # Write to file to preserve newlines
+          echo "$BODY" > /tmp/release-body.md
+          echo "tag=v${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.changelog.outputs.tag }}" \
+            --title "${{ steps.changelog.outputs.tag }}" \
+            --notes-file /tmp/release-body.md \
+            --verify-tag
+
+      # Future: add PyPI publish step here
+      # - name: Build and publish to PyPI
+      #   run: |
+      #     uv build
+      #     uv publish --token ${{ secrets.PYPI_TOKEN }}

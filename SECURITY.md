@@ -33,7 +33,7 @@ Instead:
 1. Go to
    [github.com/Swanand58/relic/security/advisories/new](https://github.com/Swanand58/relic/security/advisories/new)
    and create a **private security advisory**, or
-2. Email **swanandkhonde@gmail.com** with the subject line
+2. Email **khondeswanand@gmail.com** with the subject line
    `[relic security]`.
 
 Please include:

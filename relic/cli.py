@@ -17,6 +17,7 @@ from relic.agent_config import AGENTS, init_agent, init_all_agents
 from relic.audit import compute_audit, render_audit
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
+from relic.diff import compute_diff, diff_to_toon
 from relic.discovery import discover_subprojects
 from relic.indexer import compute_stats, load_graph, run_index
 from relic.mcp_server import run as run_mcp
@@ -407,6 +408,28 @@ def benchmark_cmd(
     and hidden callers it would miss entirely. Run this to prove relic's value.
     """
     run_benchmark(target, PROJECT_ROOT, KNOWLEDGE_DIR, depth=depth)
+
+
+@app.command(name="diff")
+def diff_cmd() -> None:
+    """Show what changed since the last index.
+
+    Compares on-disk source files against the indexed graph to surface
+    new files, deleted files, and changed symbols. Helps agents decide
+    whether to call relic_reindex.
+    """
+    if not KNOWLEDGE_DIR.exists():
+        err_console.print(style.error("no index found — run `relic index` first"))
+        raise SystemExit(1)
+
+    result = compute_diff(PROJECT_ROOT, KNOWLEDGE_DIR, CONFIG_FILE)
+    if not result["stale"]:
+        console.print(style.success("index is up-to-date — no changes detected"))
+        return
+
+    console.print(style.header("diff"))
+    toon = diff_to_toon(result)
+    console.print(toon)
 
 
 @app.callback(invoke_without_command=True)

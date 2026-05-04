@@ -1,9 +1,10 @@
 """Shared pytest fixtures for relic tests.
 
 `sample_graph` builds a small synthetic NetworkX DiGraph that mirrors what the
-real indexer produces — file nodes, symbol nodes, and the three edge types
-(imports / defines / extends). Tests exercise search, query, disambiguation,
-and TOON serializers against it without ever touching disk.
+real indexer produces — file nodes, symbol nodes, and the five edge types
+(imports / defines / extends / tested_by / tests). Tests exercise search,
+query, disambiguation, and TOON serializers against it without ever touching
+disk.
 
 `tmp_project` materializes a tiny project tree with a `relic.yaml` and source
 files, runs `relic index` on it, and yields the project root. Use for tests
@@ -47,16 +48,16 @@ def sample_graph() -> nx.DiGraph:
     for path, lang, sp in files:
         G.add_node(path, ntype="file", path=path, language=lang, subproject=sp)
 
-    # Symbols
+    # Symbols (with signatures)
     symbols = [
-        ("PaymentProcessor", "class", "payments/processor.py", 10),
-        ("process", "function", "payments/processor.py", 45),
-        ("Order", "class", "payments/models.py", 5),
-        ("process", "function", "orders/handler.py", 12),
+        ("PaymentProcessor", "class", "payments/processor.py", 10, "PaymentProcessor"),
+        ("process", "function", "payments/processor.py", 45, "process(items: list[Order]) -> Receipt"),
+        ("Order", "class", "payments/models.py", 5, "Order"),
+        ("process", "function", "orders/handler.py", 12, "process(request)"),
     ]
-    for name, stype, path, line in symbols:
+    for name, stype, path, line, sig in symbols:
         sid = f"{name}@{path}"
-        G.add_node(sid, ntype="symbol", name=name, stype=stype, path=path, line=line)
+        G.add_node(sid, ntype="symbol", name=name, stype=stype, path=path, line=line, signature=sig)
         G.add_edge(path, sid, etype="defines")
 
     # Imports

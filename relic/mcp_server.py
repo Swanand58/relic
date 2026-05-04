@@ -84,6 +84,8 @@ def _to_toon(subgraph, focus_path: str) -> str:
     import_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "imports"]
     define_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "defines"]
     extends_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "extends"]
+    tested_by_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "tested_by"]
+    uses_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "uses"]
     return subgraph_to_toon(
         focus_path=focus_path,
         file_nodes=file_nodes,
@@ -91,6 +93,8 @@ def _to_toon(subgraph, focus_path: str) -> str:
         import_edges=import_edges,
         define_edges=define_edges,
         extends_edges=extends_edges,
+        tested_by_edges=tested_by_edges,
+        uses_edges=uses_edges,
     )
 
 
@@ -114,16 +118,17 @@ async def list_tools() -> list[Tool]:
             name="relic_query",
             description=(
                 "TOON dependency context for a file or symbol: imports, exports, "
-                "neighbors, callers (up to `depth` hops). Call before editing any "
-                "unfamiliar file. Ambiguous symbol → TOON candidates list; "
-                "re-query with the full file path."
+                "signatures, neighbors, callers (up to `depth` hops). Call before "
+                "editing any unfamiliar file. Ambiguous symbol → TOON candidates "
+                "list; re-query with full file path. Supports space-separated "
+                "targets for batch query and Class.method dotted notation."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": "File path or symbol name.",
+                        "description": "File path, symbol name, Class.method, or space-separated targets.",
                     },
                     "depth": {
                         "type": "integer",
@@ -212,6 +217,37 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
     raise ValueError(f"Unknown tool: {name}")
 
 
+def _resolve_dotted(G, target: str) -> list[str]:
+    """Resolve dotted notation like ``ClassName.method`` to a symbol node.
+
+    Returns matching node IDs, or [] if no match.
+    """
+    if "." not in target:
+        return []
+    parts = target.split(".", 1)
+    parent_name, child_name = parts[0], parts[1]
+
+    for n, d in G.nodes(data=True):
+        if d.get("ntype") != "symbol" or d.get("name") != child_name:
+            continue
+        file_path = d.get("path", "")
+        parent_matches = [
+            pn
+            for pn, pd in G.nodes(data=True)
+            if pd.get("ntype") == "symbol" and pd.get("name") == parent_name and pd.get("path") == file_path
+        ]
+        if parent_matches:
+            return [n]
+
+    for n, d in G.nodes(data=True):
+        if d.get("ntype") != "symbol" or d.get("name") != child_name:
+            continue
+        if parent_name in d.get("path", ""):
+            return [n]
+
+    return []
+
+
 def _handle_query(args: dict) -> list[TextContent]:
     target: str = args.get("target", "")
     depth: int = int(args.get("depth", 2))
@@ -223,7 +259,26 @@ def _handle_query(args: dict) -> list[TextContent]:
     if err:
         return [TextContent(type="text", text=err)]
 
-    matches = _resolve_node(G, target)
+    targets = target.split() if " " in target else [target]
+
+    if len(targets) == 1:
+        return _query_single(G, targets[0], depth)
+
+    # Batch mode: merge results for multiple targets
+    sections: list[str] = []
+    for t in targets:
+        result = _query_single(G, t, depth)
+        sections.append(result[0].text)
+    return [TextContent(type="text", text="\n\n---\n\n".join(sections))]
+
+
+def _query_single(G, target: str, depth: int) -> list[TextContent]:
+    """Resolve and render a single target."""
+    # Try dotted notation first (ClassName.method, File.Symbol)
+    matches = _resolve_dotted(G, target)
+    if not matches:
+        matches = _resolve_node(G, target)
+
     if not matches:
         suggestions = suggest_close_matches(G, target)
         msg = f"Not found: '{target}'."
@@ -238,7 +293,14 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     node_id = matches[0]
     subgraph = _bfs_subgraph(G, node_id, depth)
-    return [TextContent(type="text", text=_to_toon(subgraph, node_id))]
+
+    node_data = G.nodes[node_id]
+    if node_data.get("ntype") == "symbol":
+        focus_path = node_data.get("path", node_id)
+    else:
+        focus_path = node_id
+
+    return [TextContent(type="text", text=_to_toon(subgraph, focus_path))]
 
 
 def _handle_search(args: dict) -> list[TextContent]:

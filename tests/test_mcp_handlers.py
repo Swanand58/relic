@@ -106,11 +106,28 @@ class TestHandleQuery:
         assert "focus: src/processor.py" in text
 
     def test_depth_argument_respected(self, tmp_project: Path):
-        # depth=0 returns just the focus node, no neighbors.
         out = _handle_query({"target": "src/processor.py", "depth": 0})
         text = out[0].text
         assert "focus: src/processor.py" in text
         assert "neighbors[" not in text
+
+    def test_batch_query_returns_merged_output(self, tmp_project: Path):
+        out = _handle_query({"target": "src/processor.py src/handler.py"})
+        text = out[0].text
+        assert "focus: src/processor.py" in text
+        assert "focus: src/handler.py" in text
+        assert "---" in text
+
+    def test_dotted_notation_resolves_symbol(self, tmp_project: Path):
+        out = _handle_query({"target": "PaymentProcessor.process"})
+        text = out[0].text
+        assert "focus:" in text
+        assert "ambiguous" not in text
+
+    def test_signatures_in_query_output(self, tmp_project: Path):
+        out = _handle_query({"target": "src/processor.py"})
+        text = out[0].text
+        assert "signature" in text
 
 
 # ---------------------------------------------------------------------------

@@ -384,16 +384,23 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
 # ---------------------------------------------------------------------------
 
 
-def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[Path, str]]:
-    """Return list of (absolute_path, subproject_name) for all indexable files."""
-    results = []
-    seen = set()
+_TEST_DIRS = {"tests", "test", "__tests__", "spec"}
 
-    for name, cfg in subprojects.items():
-        sub_path = (project_root / cfg["path"]).resolve()
-        if not sub_path.exists():
-            continue
-        for p in sorted(sub_path.rglob("*")):
+
+def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[Path, str]]:
+    """Return list of (absolute_path, subproject_name) for all indexable files.
+
+    Walks each subproject path declared in relic.yaml, plus any top-level
+    test directories (tests/, test/, __tests__/, spec/) so that test files
+    are searchable and can participate in tested_by edges.
+    """
+    results = []
+    seen: set[str] = set()
+
+    def _walk(root: Path, sp_name: str) -> None:
+        if not root.exists():
+            return
+        for p in sorted(root.rglob("*")):
             if p.is_symlink() or not p.is_file():
                 continue
             if any(part in SKIP_DIRS for part in p.parts):
@@ -405,7 +412,19 @@ def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[P
             key = str(p.resolve())
             if key not in seen:
                 seen.add(key)
-                results.append((p, name))
+                results.append((p, sp_name))
+
+    for name, cfg in subprojects.items():
+        sub_path = (project_root / cfg["path"]).resolve()
+        _walk(sub_path, name)
+
+    # Auto-discover top-level test directories
+    for test_dir_name in _TEST_DIRS:
+        test_dir = (project_root / test_dir_name).resolve()
+        if test_dir.exists() and test_dir.is_dir():
+            already_covered = any(test_dir == (project_root / cfg["path"]).resolve() for cfg in subprojects.values())
+            if not already_covered:
+                _walk(test_dir, "")
 
     return results
 

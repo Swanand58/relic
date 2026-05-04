@@ -80,10 +80,11 @@ def compute_diff(
         disk_syms = _symbol_fingerprint(source, rel, project_root, lang)
 
         graph_syms: set[str] = set()
-        for succ in G.successors(rel):
-            d = G.nodes[succ]
-            if d.get("ntype") == "symbol":
-                graph_syms.add(f"{d['name']}:{d['stype']}")
+        for _, succ, edata in G.out_edges(rel, data=True):
+            if edata.get("etype") == "defines":
+                d = G.nodes[succ]
+                if d.get("ntype") == "symbol":
+                    graph_syms.add(f"{d['name']}:{d['stype']}")
 
         added = sorted(disk_syms - graph_syms)
         removed = sorted(graph_syms - disk_syms)

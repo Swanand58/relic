@@ -25,10 +25,9 @@ from relic.search import (
     available_subprojects,
     render_search_toon,
     search_graph,
-    suggest_close_matches,
 )
 from relic.style import console, err_console
-from relic.toon import candidates_to_toon, full_index_to_toon, subgraph_to_toon
+from relic.toon import full_index_to_toon
 from relic.watcher import run_watch
 
 app = typer.Typer(
@@ -156,95 +155,31 @@ def index_cmd() -> None:
 
 @app.command(name="query")
 def query_cmd(
-    target: str = typer.Argument(..., help="File path or symbol name to query.", metavar="FILE_OR_SYMBOL"),
+    target: str = typer.Argument(
+        ..., help="File path, symbol name, Class.method, or space-separated targets.", metavar="TARGET"
+    ),
     depth: int = typer.Option(2, "--depth", "-d", help="Graph traversal depth (hops)."),
 ) -> None:
     """Query the knowledge graph for a file or symbol and print a TOON context subgraph.
 
+    Supports dotted notation (Class.method) and space-separated batch queries.
     Coding agents run this before editing a file to get precise, token-efficient context.
     Output goes to stdout — agents read it directly from the bash tool result.
     """
-    try:
-        G = load_graph(KNOWLEDGE_DIR)
-    except FileNotFoundError as exc:
-        console.print(style.error(str(exc)))
+    from relic.mcp_server import _handle_query
+
+    result = _handle_query({"target": target, "depth": depth})
+    text = result[0].text
+
+    if text.startswith("Error:") or text.startswith("Not found:"):
+        console.print(style.error(text.split("\n")[0]))
+        for line in text.split("\n")[1:]:
+            if line.strip():
+                console.print(style.dim(f"   {line.strip()}"))
         raise SystemExit(1)
 
-    target_norm = target.lstrip("./")
-    path_candidates = [target, target_norm, str(Path(target))]
-    abs_target = Path(target)
-    if abs_target.is_absolute():
-        try:
-            from pathlib import PurePosixPath
-
-            path_candidates.append(PurePosixPath(abs_target.relative_to(PROJECT_ROOT)).as_posix())
-        except ValueError:
-            pass
-
-    node_id = None
-    for candidate in path_candidates:
-        if candidate in G.nodes:
-            node_id = candidate
-            break
-
-    if node_id is None:
-        symbol_matches = [n for n, d in G.nodes(data=True) if d.get("ntype") == "symbol" and d.get("name") == target]
-        if not symbol_matches:
-            console.print(style.error(f"not found: '{target}'"))
-            suggestions = suggest_close_matches(G, target)
-            if suggestions:
-                console.print(style.dim("   did you mean?"))
-                for s in suggestions:
-                    console.print(f"      [bold {style.SECONDARY}]{s}[/]")
-            console.print(
-                style.dim("   try `relic search <name>` to explore, or `relic index` if the file was added recently.")
-            )
-            raise SystemExit(1)
-        if len(symbol_matches) > 1:
-            cand_data = [G.nodes[n] for n in symbol_matches]
-            print(candidates_to_toon(target, cand_data))
-            err_console.print(
-                style.dim(
-                    f"ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
-                    f"re-run with the file path to scope the query"
-                )
-            )
-            return
-        node_id = symbol_matches[0]
-
-    neighbours = {node_id}
-    frontier = {node_id}
-    for _ in range(depth):
-        next_frontier = set()
-        for n in frontier:
-            next_frontier.update(G.predecessors(n))
-            next_frontier.update(G.successors(n))
-        next_frontier -= neighbours
-        neighbours.update(next_frontier)
-        frontier = next_frontier
-
-    subgraph = G.subgraph(neighbours)
-
-    file_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "file"]
-    symbol_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "symbol"]
-    import_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "imports"]
-    define_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "defines"]
-    extends_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "extends"]
-
-    toon = subgraph_to_toon(
-        focus_path=node_id,
-        file_nodes=file_nodes,
-        symbol_nodes=symbol_nodes,
-        import_edges=import_edges,
-        define_edges=define_edges,
-        extends_edges=extends_edges,
-    )
-
-    print(toon)
-
-    err_console.print(
-        style.dim(f"query: {node_id} {style.DOT} {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}")
-    )
+    print(text)
+    err_console.print(style.dim(f"query: {target} {style.DOT} depth={depth}"))
 
 
 @app.command(name="search")

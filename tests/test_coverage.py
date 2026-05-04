@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from io import StringIO
 from pathlib import Path
@@ -47,7 +46,7 @@ class TestComputeCoverage:
         indexed = cov["subprojects"]["app"]["indexed"]
         assert any(p.endswith("good.py") for p in indexed)
         assert any(p.endswith("also_good.ts") for p in indexed)
-        assert any(p.endswith(os.path.join("nested", "inner.py")) for p in indexed)
+        assert any(p.endswith("nested/inner.py") for p in indexed)
 
     def test_no_parser_bucket_collects_md_and_yaml(self, tmp_path: Path):
         root, subprojects = _make_subproject(tmp_path)

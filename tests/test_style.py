@@ -24,8 +24,7 @@ class TestPalette:
 
     def test_palette_is_truecolor_hex(self):
         # Every named colour must be a usable hex string.
-        for name in ("PRIMARY", "DEEP", "SECONDARY", "FG", "DIM",
-                     "SUCCESS", "WARN", "ERROR"):
+        for name in ("PRIMARY", "DEEP", "SECONDARY", "FG", "DIM", "SUCCESS", "WARN", "ERROR"):
             value = getattr(style, name)
             assert isinstance(value, str)
             assert value.startswith("#") and len(value) == 7

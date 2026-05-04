@@ -49,20 +49,36 @@ import yaml
 # ---------------------------------------------------------------------------
 
 SKIP_DIRS = {
-    ".git", ".github", "node_modules", ".venv", "venv", "env",
-    "__pycache__", ".tox", ".pytest_cache", ".ruff_cache",
-    "dist", "build", "out", "target", ".next", ".nuxt",
-    "coverage", "htmlcov", ".knowledge", "test-results",
+    ".git",
+    ".github",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".tox",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+    "out",
+    "target",
+    ".next",
+    ".nuxt",
+    "coverage",
+    "htmlcov",
+    ".knowledge",
+    "test-results",
 }
 
 LANGUAGE_MAP = {
-    ".py":   "python",
-    ".ts":   "typescript",
-    ".tsx":  "typescript",
-    ".js":   "javascript",
-    ".jsx":  "javascript",
-    ".mjs":  "javascript",
-    ".cjs":  "javascript",
+    ".py": "python",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
 }
 
 MAX_FILE_BYTES = 200_000
@@ -71,6 +87,7 @@ MAX_FILE_BYTES = 200_000
 # ---------------------------------------------------------------------------
 # Python analyser
 # ---------------------------------------------------------------------------
+
 
 def _analyse_python(source: str, rel_path: str, project_root: Path) -> tuple[list[str], list[dict]]:
     """Parse Python source with ast.
@@ -100,7 +117,9 @@ def _analyse_python(source: str, rel_path: str, project_root: Path) -> tuple[lis
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 resolved = _resolve_python_import(
-                    node.module, file_dir, project_root,
+                    node.module,
+                    file_dir,
+                    project_root,
                     level=node.level or 0,
                 )
                 if resolved:
@@ -247,6 +266,7 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
 # Core graph builder
 # ---------------------------------------------------------------------------
 
+
 def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[Path, str]]:
     """Return list of (absolute_path, subproject_name) for all indexable files."""
     results = []
@@ -350,6 +370,7 @@ def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
 # Persistence
 # ---------------------------------------------------------------------------
 
+
 def save_graph(G: nx.DiGraph, knowledge_dir: Path) -> None:
     """Serialize the graph to .knowledge/index.pkl."""
     knowledge_dir.mkdir(parents=True, exist_ok=True)
@@ -365,9 +386,7 @@ def load_graph(knowledge_dir: Path) -> nx.DiGraph:
     """
     pkl_path = knowledge_dir / "index.pkl"
     if not pkl_path.exists():
-        raise FileNotFoundError(
-            "No index found. Run `relic index` first."
-        )
+        raise FileNotFoundError("No index found. Run `relic index` first.")
     with pkl_path.open("rb") as f:
         return pickle.load(f)
 
@@ -375,6 +394,7 @@ def load_graph(knowledge_dir: Path) -> nx.DiGraph:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
     """Return health metrics for the loaded knowledge graph.
@@ -394,9 +414,7 @@ def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
 
     index_path = knowledge_dir / "index.pkl"
     if index_path.exists():
-        last_updated = datetime.datetime.fromtimestamp(
-            index_path.stat().st_mtime
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        last_updated = datetime.datetime.fromtimestamp(index_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     else:
         last_updated = "unknown"
 
@@ -428,9 +446,7 @@ def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
 def run_index(project_root: Path, knowledge_dir: Path, config_file: Path) -> nx.DiGraph:
     """Load relic.yaml, build graph, save to knowledge_dir. Returns the graph."""
     if not config_file.exists():
-        raise FileNotFoundError(
-            f"{config_file} not found. Run `relic init` first."
-        )
+        raise FileNotFoundError(f"{config_file} not found. Run `relic init` first.")
 
     with config_file.open(encoding="utf-8") as f:
         cfg = yaml.safe_load(f)

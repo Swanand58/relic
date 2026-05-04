@@ -55,13 +55,9 @@ class TestMcpBudget:
 
     def test_total_under_budget(self):
         tools = self._tools()
-        total = sum(
-            _tokens(t.description or "") + _tokens(str(t.inputSchema))
-            for t in tools
-        )
+        total = sum(_tokens(t.description or "") + _tokens(str(t.inputSchema)) for t in tools)
         assert total <= MCP_TOTAL_BUDGET, (
-            f"MCP tool definitions total {total} tokens, budget is "
-            f"{MCP_TOTAL_BUDGET}. Trim a description or schema."
+            f"MCP tool definitions total {total} tokens, budget is {MCP_TOTAL_BUDGET}. Trim a description or schema."
         )
 
     def test_no_tool_description_exceeds_quarter_of_budget(self):
@@ -71,9 +67,7 @@ class TestMcpBudget:
         per_tool_cap = MCP_TOTAL_BUDGET // 2  # 250 — generous, blocks a single doubling
         for t in self._tools():
             cost = _tokens(t.description or "") + _tokens(str(t.inputSchema))
-            assert cost <= per_tool_cap, (
-                f"{t.name} alone is {cost} tokens; per-tool cap is {per_tool_cap}."
-            )
+            assert cost <= per_tool_cap, f"{t.name} alone is {cost} tokens; per-tool cap is {per_tool_cap}."
 
     def test_all_four_tools_present(self):
         # Budget is meaningless if we silently lose a tool. Lock the surface.

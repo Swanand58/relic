@@ -27,10 +27,10 @@ from relic.agent_config import (
     init_agent,
 )
 
-
 # ---------------------------------------------------------------------------
 # RELIC_INSTRUCTIONS — wording regression
 # ---------------------------------------------------------------------------
+
 
 class TestInstructionsContent:
     """Pin the imperative wording shipped in Phase 3.
@@ -63,6 +63,7 @@ class TestInstructionsContent:
 # ---------------------------------------------------------------------------
 # _pick_example_file — fallback chain
 # ---------------------------------------------------------------------------
+
 
 class TestPickExampleFile:
     def test_picks_most_connected_non_barrel(self, tmp_path: Path):
@@ -130,6 +131,7 @@ class TestPickExampleFile:
 # init_agent — end-to-end placeholder substitution
 # ---------------------------------------------------------------------------
 
+
 class TestInitAgent:
     def test_writes_block_with_substituted_example(self, tmp_project: Path):
         init_agent("claude", tmp_project)
@@ -144,6 +146,7 @@ class TestInitAgent:
 
     def test_mcp_config_registered(self, tmp_project: Path):
         import json
+
         init_agent("claude", tmp_project)
         cfg = json.loads((tmp_project / ".claude/settings.json").read_text(encoding="utf-8"))
         assert cfg["mcpServers"]["relic"]["command"] == "relic"

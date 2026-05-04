@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install
+        run: uv sync --all-extras --group dev
+      - name: Ruff check
+        run: uv run ruff check relic tests
+      - name: Ruff format --check
+        run: uv run ruff format --check relic tests
+
+  test:
+    name: test (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install (${{ matrix.python-version }})
+        run: uv sync --all-extras --group dev --python ${{ matrix.python-version }}
+      - name: Pytest
+        run: uv run pytest
+
+  smoke:
+    name: smoke (e2e CLI)
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install
+        run: uv sync --all-extras
+      - name: Pin relic.yaml (dogfood on relic itself)
+        run: |
+          cat > relic.yaml <<'EOF'
+          subprojects:
+            relic:
+              path: ./relic
+              description: ""
+          EOF
+      - name: relic --version
+        run: uv run relic --version
+      - name: relic index
+        run: uv run relic index
+      - name: relic stats
+        run: uv run relic stats
+      - name: relic search
+        run: uv run relic search compute_audit
+      - name: relic query (file)
+        run: uv run relic query relic/audit.py
+      - name: relic query (symbol)
+        run: uv run relic query compute_audit
+      - name: relic coverage
+        run: uv run relic coverage
+      - name: relic audit
+        run: uv run relic audit
+      - name: relic benchmark
+        run: uv run relic benchmark relic/audit.py

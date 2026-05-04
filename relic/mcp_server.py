@@ -41,6 +41,7 @@ server = Server("relic")
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_node(G, target: str) -> list[str]:
     """Find node IDs for a file path or symbol name.
 
@@ -103,6 +104,7 @@ def _load_or_error(knowledge_dir: Path):
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
+
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -194,6 +196,7 @@ async def list_tools() -> list[Tool]:
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
     args = arguments or {}
@@ -254,13 +257,19 @@ def _handle_search(args: dict) -> list[TextContent]:
         available = available_subprojects(G)
         if subproject not in available:
             avail_str = ", ".join(sorted(available)) or "(none indexed)"
-            return [TextContent(
-                type="text",
-                text=f"Error: no such subproject '{subproject}'. Available: {avail_str}.",
-            )]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: no such subproject '{subproject}'. Available: {avail_str}.",
+                )
+            ]
 
     file_matches, symbol_matches = search_graph(
-        G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
+        G,
+        query,
+        kind=kind,
+        subproject=subproject,
+        limit=limit,  # type: ignore[arg-type]
     )
     return [TextContent(type="text", text=render_search_toon(query, file_matches, symbol_matches))]
 
@@ -279,15 +288,14 @@ async def _handle_reindex() -> list[TextContent]:
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
     edge_count = G.number_of_edges()
 
-    return [TextContent(
-        type="text",
-        text=(
-            f"reindex: done in {elapsed:.1f}s\n"
-            f"files: {file_count}\n"
-            f"symbols: {symbol_count}\n"
-            f"edges: {edge_count}"
-        ),
-    )]
+    return [
+        TextContent(
+            type="text",
+            text=(
+                f"reindex: done in {elapsed:.1f}s\nfiles: {file_count}\nsymbols: {symbol_count}\nedges: {edge_count}"
+            ),
+        )
+    ]
 
 
 def _handle_stats() -> list[TextContent]:
@@ -314,8 +322,10 @@ def _handle_stats() -> list[TextContent]:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def run() -> None:
     """Start the MCP stdio server."""
+
     async def _serve() -> None:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(

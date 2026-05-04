@@ -12,16 +12,15 @@ that need the real CLI / MCP handler end-to-end.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import networkx as nx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # In-memory graph fixture — fastest, used for unit tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_graph() -> nx.DiGraph:
@@ -72,6 +71,7 @@ def sample_graph() -> nx.DiGraph:
 # On-disk project fixture — slower, used for end-to-end tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Materialize a tiny indexable project and chdir into it.
@@ -93,10 +93,7 @@ def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     (src / "handler.py").write_text(
-        "from src.processor import PaymentProcessor\n"
-        "\n"
-        "def process():\n"
-        "    return PaymentProcessor().process(10)\n",
+        "from src.processor import PaymentProcessor\n\ndef process():\n    return PaymentProcessor().process(10)\n",
         encoding="utf-8",
     )
     (src / "views.py").write_text(
@@ -105,16 +102,14 @@ def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
 
     (tmp_path / "relic.yaml").write_text(
-        "subprojects:\n"
-        "  app:\n"
-        "    path: ./src\n"
-        '    description: "App source"\n',
+        'subprojects:\n  app:\n    path: ./src\n    description: "App source"\n',
         encoding="utf-8",
     )
 
     monkeypatch.chdir(tmp_path)
 
     from relic.indexer import run_index
+
     run_index(tmp_path, tmp_path / ".knowledge", tmp_path / "relic.yaml")
 
     return tmp_path

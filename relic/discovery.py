@@ -29,12 +29,30 @@ MONOREPO_CONTAINERS = {"packages", "apps", "services", "libs", "modules", "crate
 
 # Directory names that are never subprojects.
 SKIP_DIRS = {
-    ".git", ".github", ".vscode", ".idea",
-    "node_modules", ".venv", "venv", "env",
-    "__pycache__", ".tox", ".pytest_cache", ".ruff_cache",
-    "dist", "build", "out", "target", ".next", ".nuxt",
-    "coverage", "htmlcov", ".coverage",
-    ".knowledge", "test-results", ".playwright-mcp",
+    ".git",
+    ".github",
+    ".vscode",
+    ".idea",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    ".tox",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+    "out",
+    "target",
+    ".next",
+    ".nuxt",
+    "coverage",
+    "htmlcov",
+    ".coverage",
+    ".knowledge",
+    "test-results",
+    ".playwright-mcp",
 }
 
 # Source-like directory names that qualify as a subproject on their own.
@@ -42,8 +60,20 @@ SOURCE_DIRS = {"src", "lib", "core", "api", "app", "server", "client", "pkg"}
 
 # Extensions that count as source files.
 SOURCE_EXTENSIONS = {
-    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
-    ".java", ".kt", ".rb", ".cs", ".cpp", ".c", ".h",
+    ".py",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".rb",
+    ".cs",
+    ".cpp",
+    ".c",
+    ".h",
 }
 
 
@@ -85,6 +115,7 @@ def _infer_description(path: Path, name: str) -> str:
     if pkg.exists():
         try:
             import json
+
             data = json.loads(pkg.read_text(encoding="utf-8"))
             if desc := data.get("description", "").strip():
                 return desc
@@ -96,6 +127,7 @@ def _infer_description(path: Path, name: str) -> str:
     if pyproj.exists():
         try:
             import tomllib  # Python 3.11+
+
             with pyproj.open("rb") as f:
                 data = tomllib.load(f)
             if desc := data.get("project", {}).get("description", "").strip():
@@ -126,7 +158,8 @@ def discover_subprojects(project_root: Path) -> dict[str, dict]:
     found: dict[str, dict] = {}
 
     direct_children = [
-        p for p in sorted(project_root.iterdir())
+        p
+        for p in sorted(project_root.iterdir())
         if p.is_dir() and p.name not in SKIP_DIRS and not p.name.startswith(".")
     ]
 

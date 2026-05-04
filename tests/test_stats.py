@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from relic.indexer import compute_stats
 from relic.mcp_server import _handle_stats
 
@@ -34,9 +32,7 @@ class TestComputeStats:
         stats = compute_stats(sample_graph, tmp_path)
         assert stats["last_updated"] == "unknown"
 
-    def test_last_updated_set_when_index_exists(
-        self, sample_graph, tmp_path: Path
-    ):
+    def test_last_updated_set_when_index_exists(self, sample_graph, tmp_path: Path):
         knowledge_dir = tmp_path / ".knowledge"
         knowledge_dir.mkdir()
         (knowledge_dir / "index.pkl").write_bytes(b"placeholder")
@@ -49,6 +45,7 @@ class TestComputeStats:
 # ---------------------------------------------------------------------------
 # MCP _handle_stats — uses compute_stats under the hood
 # ---------------------------------------------------------------------------
+
 
 class TestHandleStats:
     def test_no_index_returns_error(self, tmp_path: Path, monkeypatch):

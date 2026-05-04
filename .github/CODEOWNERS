@@ -1,0 +1,8 @@
+# Default owner for everything in the repo. Required reviewer on all PRs
+# unless overridden by a more specific rule below.
+*                           @Swanand58
+
+# Releases and CI changes always need maintainer approval.
+/.github/                   @Swanand58
+/CHANGELOG.md               @Swanand58
+/pyproject.toml             @Swanand58

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-04
+
+### Added
+
+- **Function signatures**: Symbol nodes carry full signatures extracted from
+  Python AST and TypeScript regex. Agents see parameter types, return types,
+  and arity without reading source files.
+- **Test file mapping**: Convention-based `tested_by`/`tests` edges
+  (`test_foo.py`, `foo.test.ts`, `__tests__/`). Agents stop grepping for
+  test files — the graph already knows.
+- **Python class inheritance**: `extends` edges from `ast.ClassDef.bases`.
+- **Batch query**: `relic_query "A B C"` returns one merged TOON instead of
+  three separate calls. Cuts round-trips and header overhead.
+- **Symbol-scoped query**: `relic_query Class.method` resolves dotted notation
+  to the specific symbol, producing a smaller TOON than querying the whole file.
+- **Blast radius / callers**: `uses` edges track `from X import Y` at symbol
+  level. TOON output includes a `callers` section showing which files reference
+  each exported symbol.
+- **`relic diff`**: Compares on-disk source state against the last indexed graph.
+  Shows new files, deleted files, and changed symbols so agents know whether to
+  reindex.
+- **Smart update**: `relic --update` now installs the latest GitHub release tag
+  instead of tracking `main`.
+
 ## [0.1.0] - 2025-05-03
 
 ### Added
@@ -38,5 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache stability tests**: MCP `list_tools()` output is byte-identical
   across calls with no dynamic content leakage.
 
-[unreleased]: https://github.com/Swanand58/relic/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/Swanand58/relic/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Swanand58/relic/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Swanand58/relic/releases/tag/v0.1.0

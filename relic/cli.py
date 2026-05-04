@@ -443,7 +443,7 @@ def main(
         help=(f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'."),
         metavar="AGENT",
     ),
-    update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
+    update: bool = typer.Option(False, "--update", "-u", help="Pull latest release from GitHub and reinstall."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
     """Relic — build and query a static knowledge graph for AI coding agents."""
@@ -463,21 +463,36 @@ def main(
 
     if update:
         console.print(style.header("update"))
-        console.print(style.dim("   pulling latest from main…\n"))
+        console.print(style.dim("   fetching latest release tag…\n"))
+
+        tag_result = subprocess.run(
+            ["gh", "api", "repos/Swanand58/relic/releases/latest", "--jq", ".tag_name"],
+            capture_output=True,
+            text=True,
+        )
+        tag = tag_result.stdout.strip() if tag_result.returncode == 0 and tag_result.stdout.strip() else None
+
+        if tag:
+            console.print(style.dim(f"   installing {tag}…\n"))
+            ref = tag
+        else:
+            console.print(style.dim("   no release found, falling back to main…\n"))
+            ref = "main"
+
         result = subprocess.run(
             [
                 "uv",
                 "tool",
                 "install",
                 "--reinstall",
-                "git+https://github.com/Swanand58/relic@main",
+                f"git+https://github.com/Swanand58/relic@{ref}",
             ],
             text=True,
         )
         if result.returncode != 0:
             console.print(style.error("update failed — is uv installed and on PATH?"))
             raise SystemExit(result.returncode)
-        console.print(style.success("relic updated"))
+        console.print(style.success(f"relic updated to {ref}"))
         return
 
     if ctx.invoked_subcommand is not None:

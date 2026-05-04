@@ -10,9 +10,11 @@ Every time an agent opens a file it reads that file, then the files it imports, 
 
 Relic builds a static knowledge graph from your source code in seconds (no LLM). Before the agent touches any file, it calls `relic_query` and gets:
 
-- What that file exports (exact symbol names and line numbers)
+- What that file exports (symbol names, signatures, line numbers)
 - What it imports (resolved paths, not guesses)
-- What else in the codebase depends on it
+- What else in the codebase depends on it (callers at the symbol level)
+- Which test file covers it
+- Class inheritance chains
 
 300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
@@ -39,11 +41,11 @@ neighbors[9]{path,language,subproject}:
   src/pagination/PaginationPlugin.ts,typescript,src
   ...
 
-exports[8]{name,type,line}:
-  resolvePageSize,function,21
-  resolveMargins,function,29
-  resolveHeader,function,38
-  FolioStorage,interface,67
+exports[8]{name,type,line,signature}:
+  resolvePageSize,function,21,resolvePageSize(doc: PageDocument) -> number
+  resolveMargins,function,29,resolveMargins(config: MarginConfig) -> Margins
+  resolveHeader,function,38,resolveHeader(page: Page) -> HeaderBlock
+  FolioStorage,interface,67,FolioStorage
   ...
 
 imports[8]{from,to}:
@@ -53,9 +55,16 @@ imports[8]{from,to}:
 
 imported_by[1]{from,to}:
   src/index.ts,src/core/PageExtension.ts
+
+tested_by[1]{source,test}:
+  src/core/PageExtension.ts,tests/PageExtension.test.ts
+
+callers[2]{file,symbol}:
+  src/index.ts,resolvePageSize
+  src/render/engine.ts,resolveMargins
 ```
 
-Agent knows the structure before reading the code. Fewer follow-up reads. No hallucinated imports. No surprise broken callers.
+Agent knows the structure — including signatures, test files, and callers — before reading the code. Fewer follow-up reads. No hallucinated imports. No surprise broken callers.
 
 ---
 
@@ -132,7 +141,7 @@ Relic exposes four tools over MCP (stdio transport):
 
 | Tool | When to call |
 |---|---|
-| `relic_query` | Before editing unfamiliar code — returns imports, exports, neighbors, callers |
+| `relic_query` | Before editing unfamiliar code — returns imports, exports, signatures, neighbors, callers, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`). |
 | `relic_search` | When you don't know where a class/function/file lives |
 | `relic_reindex` | After creating, editing, or deleting source files |
 | `relic_stats` | To verify the index is fresh before a large refactor |
@@ -145,8 +154,10 @@ See [docs/MCP.md](docs/MCP.md) for full tool reference and agent setup.
 
 ```bash
 relic query src/core/PageExtension.ts
-relic query resolveMargins               # by symbol name
-relic query src/core/PageExtension.ts --depth 3   # wider graph
+relic query resolveMargins                         # by symbol name
+relic query PageExtension.resolveMargins           # dotted notation — scoped to one symbol
+relic query "src/foo.ts src/bar.ts"                # batch — merged TOON for multiple targets
+relic query src/core/PageExtension.ts --depth 3    # wider graph
 ```
 
 Output is TOON (Token-Oriented Object Notation) — tabular format that declares column names once and lists values row by row. ~40% fewer tokens than equivalent JSON for the same data.
@@ -171,6 +182,16 @@ relic coverage --verbose    # list every skipped file
 ```
 
 Shows the count and identity of files that were indexed vs silently dropped, classified by reason: `no_parser` (extension not supported), `too_large` (over 200 KB), `symlink` (skipped for safety). Use this when a query unexpectedly comes back empty — it tells you whether the file is a tool limit instead of a model error.
+
+## Check for drift
+
+```bash
+relic diff
+```
+
+Compares on-disk source files against the last indexed graph. Shows new files, deleted files, and changed symbols (added or removed functions/classes). Agents use this to decide whether to call `relic_reindex` after big PR merges. Humans use it to sanity-check the index before a session.
+
+---
 
 ## Verify relic's own cost
 
@@ -211,39 +232,42 @@ For a single target file, prints what an agent would read manually (target file 
 ## Commands
 
 ```bash
-relic init                     # auto-discover subprojects, write relic.yaml
-relic index                    # build knowledge graph from source (no LLM)
-relic query <file|symbol>      # print TOON context subgraph to stdout
-relic query <file> --depth N   # adjust traversal depth (default 2)
-relic search <term>            # ranked search across files and symbols
-relic search <term> -k symbol  # filter to symbols (or `file`, `all`)
-relic search <term> -s <name>  # restrict to a subproject
-relic stats                    # index health: counts, last_updated, subprojects
-relic watch                    # rebuild index automatically on file changes
-relic watch --debounce-ms 200  # tighter debounce window (default 500 ms)
-relic coverage                 # what's indexed vs skipped, with reasons
-relic coverage -v              # list every skipped file (not just samples)
-relic audit                    # measure relic's own token footprint
-relic benchmark <file>         # compare token cost of context with vs without relic
-relic mcp                      # start MCP stdio server (4 tools)
+relic init                         # auto-discover subprojects, write relic.yaml
+relic index                        # build knowledge graph from source (no LLM)
+relic query <file|symbol>          # print TOON context subgraph to stdout
+relic query Class.method           # symbol-scoped query via dotted notation
+relic query "fileA fileB"          # batch query — merged TOON output
+relic query <file> --depth N       # adjust traversal depth (default 2)
+relic search <term>                # ranked search across files and symbols
+relic search <term> -k symbol      # filter to symbols (or `file`, `all`)
+relic search <term> -s <name>      # restrict to a subproject
+relic stats                        # index health: counts, last_updated, subprojects
+relic diff                         # what changed since last index (new/deleted/changed)
+relic watch                        # rebuild index automatically on file changes
+relic watch --debounce-ms 200      # tighter debounce window (default 500 ms)
+relic coverage                     # what's indexed vs skipped, with reasons
+relic coverage -v                  # list every skipped file (not just samples)
+relic audit                        # measure relic's own token footprint
+relic benchmark <file>             # compare token cost of context with vs without relic
+relic mcp                          # start MCP stdio server (4 tools)
 
-relic --list                   # list subprojects in relic.yaml
-relic --init <agent>           # write agent config + MCP registration
-relic --init all               # write config for all supported agents
-relic --update                 # pull latest from GitHub main and reinstall
-relic --version                # print version
+relic --list                       # list subprojects in relic.yaml
+relic --init <agent>               # write agent config + MCP registration
+relic --init all                   # write config for all supported agents
+relic --update                     # install latest GitHub release
+relic --version                    # print version
 ```
 
 ---
 
 ## What gets indexed
 
-| Language | Files | Symbols | Imports |
-|---|---|---|---|
-| Python | ✓ | classes, functions | ✓ (ast) |
-| TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ |
-| JavaScript / JSX | ✓ | classes, functions | ✓ |
-| Other | ✓ (file nodes only) | — | — |
+| Language | Files | Symbols + Signatures | Imports | Inheritance | Test mapping |
+|---|---|---|---|---|---|
+| Python | ✓ | classes, functions (with full signatures) | ✓ (ast) | ✓ (`extends` edges) | ✓ (`test_foo.py`) |
+| TypeScript / TSX | ✓ | classes, functions, interfaces, types (with signatures) | ✓ | ✓ (`extends` edges) | ✓ (`foo.test.ts`, `foo.spec.ts`) |
+| JavaScript / JSX | ✓ | classes, functions (with signatures) | ✓ | ✓ | ✓ |
+| Other | ✓ (file nodes only) | — | — | — | — |
 
 ---
 
@@ -283,7 +307,7 @@ Register once per project, all agents in the session get all four relic tools na
 
 **No filesystem writes outside the project** — relic only writes to `.knowledge/` and (when explicitly invoked) `relic.yaml`, `.gitignore`, and the agent config files you ask it to update.
 
-**No external calls** — no API calls, no telemetry. Code never leaves your machine. The single network call relic ever makes is `relic --update`, which passes only the hardcoded `github.com/Swanand58/relic@main` URL to `uv tool install` for self-reinstall.
+**No external calls** — no API calls, no telemetry. Code never leaves your machine. The only network calls relic makes are during `relic --update`: one GitHub API call to find the latest release tag, then `uv tool install` to reinstall from that tag.
 
 For vulnerability reports see [SECURITY.md](SECURITY.md).
 

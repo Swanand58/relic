@@ -1,5 +1,9 @@
 # relic
 
+[![CI](https://github.com/Swanand58/relic/actions/workflows/ci.yml/badge.svg)](https://github.com/Swanand58/relic/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Relic solves the cold-read problem in AI coding agents.
 
 Every time an agent opens a file it reads that file, then the files it imports, then the files those import — just to understand what connects to what. That's 5-10 file reads before it can start on your actual task. Every read costs tokens.
@@ -280,3 +284,18 @@ Register once per project, all agents in the session get all four relic tools na
 **No filesystem writes outside the project** — relic only writes to `.knowledge/` and (when explicitly invoked) `relic.yaml`, `.gitignore`, and the agent config files you ask it to update.
 
 **No external calls** — no API calls, no telemetry. Code never leaves your machine. The single network call relic ever makes is `relic --update`, which passes only the hardcoded `github.com/Swanand58/relic@main` URL to `uv tool install` for self-reinstall.
+
+For vulnerability reports see [SECURITY.md](SECURITY.md).
+
+---
+
+## Contributing
+
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions,
+and what we will (and won't) accept.
+
+---
+
+## License
+
+[MIT](LICENSE)

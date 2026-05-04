@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/Swanand58/relic/security/advisories/new
+    about: Report a vulnerability privately. Do not file a public issue.
+  - name: Question / discussion
+    url: https://github.com/Swanand58/relic/discussions
+    about: Ask a question or start a discussion (no public issue needed).

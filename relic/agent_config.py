@@ -247,13 +247,11 @@ def _write_mcp_config(agent_key: str, project_root: Path) -> str:
         hooks = config.get("hooks", {})
         pre_tool_use = hooks.get("PreToolUse", [])
         cleaned = [
-            entry for entry in pre_tool_use
+            entry
+            for entry in pre_tool_use
             if not (
                 isinstance(entry, dict)
-                and any(
-                    isinstance(h, dict) and "relic" in h.get("command", "")
-                    for h in entry.get("hooks", [])
-                )
+                and any(isinstance(h, dict) and "relic" in h.get("command", "") for h in entry.get("hooks", []))
             )
         ]
         if cleaned != pre_tool_use:
@@ -276,19 +274,14 @@ def init_agent(agent_key: str, project_root: Path) -> None:
     """Write relic instructions and MCP config for a specific agent."""
     agent = AGENTS[agent_key]
     target = project_root / agent["path"]
-    instructions = RELIC_INSTRUCTIONS.replace(
-        RELIC_EXAMPLE_PLACEHOLDER, _pick_example_file(project_root)
-    )
+    instructions = RELIC_INSTRUCTIONS.replace(RELIC_EXAMPLE_PLACEHOLDER, _pick_example_file(project_root))
     action = _upsert_block(target, instructions)
     console.print(f"[green]✓[/green] [bold]{agent['name']}[/bold] — {action} [dim]{target}[/dim]")
 
     if "mcp_config" in agent:
         mcp_action = _write_mcp_config(agent_key, project_root)
         config_path = project_root / agent["mcp_config"]
-        console.print(
-            f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} "
-            f"[dim]{config_path}[/dim]"
-        )
+        console.print(f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} [dim]{config_path}[/dim]")
         console.print("[dim]tools: relic_query, relic_search, relic_reindex, relic_stats[/dim]")
 
 

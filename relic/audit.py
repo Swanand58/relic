@@ -35,8 +35,8 @@ from relic.toon import subgraph_to_toon
 
 # Healthy ranges for relic's own tax. Tuned so a typical agent has at
 # least 80 % of its system-prompt budget left after relic registers.
-TAX_HEALTHY = 1500    # ✓ green
-TAX_WARN = 2000       # ⚠ yellow above this
+TAX_HEALTHY = 1500  # ✓ green
+TAX_WARN = 2000  # ⚠ yellow above this
 # Above TAX_WARN → ✗ red. Means relic is contributing meaningfully to the
 # kind of overhead the article called out — time to trim.
 
@@ -68,12 +68,14 @@ def _mcp_tool_tokens() -> tuple[int, list[dict]]:
         desc_tok = _tokens(t.description or "")
         schema_tok = _tokens(str(t.inputSchema))
         sub_total = desc_tok + schema_tok
-        breakdown.append({
-            "name": t.name,
-            "description_tokens": desc_tok,
-            "schema_tokens": schema_tok,
-            "total": sub_total,
-        })
+        breakdown.append(
+            {
+                "name": t.name,
+                "description_tokens": desc_tok,
+                "schema_tokens": schema_tok,
+                "total": sub_total,
+            }
+        )
         total += sub_total
     return total, breakdown
 
@@ -176,6 +178,7 @@ def compute_audit(project_root: Path, knowledge_dir: Path) -> dict:
 # Renderer — themed, kv-aligned, no tables.
 # ---------------------------------------------------------------------------
 
+
 def render_audit(audit: dict, console) -> None:
     console.print(style.header("audit"))
     console.print()
@@ -183,49 +186,62 @@ def render_audit(audit: dict, console) -> None:
     console.print()
 
     kw = 22
-    console.print(style.kv(
-        "instructions block", f"~{audit['instruction_tokens']:,} tokens",
-        key_width=kw,
-    ))
+    console.print(
+        style.kv(
+            "instructions block",
+            f"~{audit['instruction_tokens']:,} tokens",
+            key_width=kw,
+        )
+    )
     console.print(f"   {' ' * kw}[{style.DIM}]CLAUDE.md / .cursorrules / AGENTS.md[/]")
 
-    console.print(style.kv(
-        "mcp tool schemas", f"~{audit['mcp_tokens']:,} tokens",
-        key_width=kw,
-    ))
+    console.print(
+        style.kv(
+            "mcp tool schemas",
+            f"~{audit['mcp_tokens']:,} tokens",
+            key_width=kw,
+        )
+    )
     console.print(f"   {' ' * kw}[{style.DIM}]4 tools, every turn[/]")
 
     console.print(f"   [{style.DIM}]{'─' * (kw + 14)}[/]")
-    console.print(style.kv(
-        "baseline tax / turn", f"~{audit['baseline_tax']:,} tokens",
-        key_width=kw,
-    ))
+    console.print(
+        style.kv(
+            "baseline tax / turn",
+            f"~{audit['baseline_tax']:,} tokens",
+            key_width=kw,
+        )
+    )
 
     sample = audit["sample_query"]
     if sample is not None:
         console.print()
-        console.print(style.dim(
-            f"   sample query  ·  {sample['sample_path']}  ·  depth={sample['depth']}"
-        ))
+        console.print(style.dim(f"   sample query  ·  {sample['sample_path']}  ·  depth={sample['depth']}"))
         console.print()
-        console.print(style.kv(
-            "relic_query response", f"~{sample['with_relic_tokens']:,} tokens",
-            key_width=kw,
-        ))
-        console.print(style.kv(
-            "manual baseline", f"~{sample['manual_baseline']:,} tokens",
-            key_width=kw,
-        ))
-        console.print(style.kv(
-            "net savings", f"~{sample['savings']:,} tokens "
-                           f"({sample['savings_pct']}%)",
-            key_width=kw,
-        ))
+        console.print(
+            style.kv(
+                "relic_query response",
+                f"~{sample['with_relic_tokens']:,} tokens",
+                key_width=kw,
+            )
+        )
+        console.print(
+            style.kv(
+                "manual baseline",
+                f"~{sample['manual_baseline']:,} tokens",
+                key_width=kw,
+            )
+        )
+        console.print(
+            style.kv(
+                "net savings",
+                f"~{sample['savings']:,} tokens ({sample['savings_pct']}%)",
+                key_width=kw,
+            )
+        )
     else:
         console.print()
-        console.print(style.dim(
-            "   sample query: not available — run `relic index` first."
-        ))
+        console.print(style.dim("   sample query: not available — run `relic index` first."))
 
     console.print()
     _print_verdict(audit, console)
@@ -238,16 +254,18 @@ def _print_verdict(audit: dict, console) -> None:
     verdict = audit["verdict"]
 
     if verdict == "healthy":
-        console.print(style.success(
-            f"baseline tax under {th['healthy']:,} tokens — within healthy range"
-        ))
+        console.print(style.success(f"baseline tax under {th['healthy']:,} tokens — within healthy range"))
     elif verdict == "warn":
-        console.print(style.warn(
-            f"baseline tax {tax:,} tokens — above the {th['healthy']:,} healthy "
-            f"target. Trim agent instructions or disable unused MCP tools."
-        ))
+        console.print(
+            style.warn(
+                f"baseline tax {tax:,} tokens — above the {th['healthy']:,} healthy "
+                f"target. Trim agent instructions or disable unused MCP tools."
+            )
+        )
     else:
-        console.print(style.error(
-            f"baseline tax {tax:,} tokens — above the {th['warn']:,} warn line. "
-            f"Relic is contributing to context overhead. File an issue."
-        ))
+        console.print(
+            style.error(
+                f"baseline tax {tax:,} tokens — above the {th['warn']:,} warn line. "
+                f"Relic is contributing to context overhead. File an issue."
+            )
+        )

@@ -22,6 +22,16 @@ DEBOUNCE = 0.05  # 50 ms — fast enough for tests, slow enough to coalesce
 SETTLE = 0.15  # buffer when waiting for timer fire
 
 
+def _wait_for(predicate, *, timeout: float = 2.0, interval: float = 0.02):
+    """Poll until predicate() is truthy or timeout expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError(f"Condition not met within {timeout}s")
+
+
 class _Counter:
     """Reindex stand-in that records call count and optional sleep duration."""
 
@@ -131,12 +141,11 @@ class TestPendingDuringReindex:
         h = DebouncedReindex(c, debounce_seconds=DEBOUNCE)
 
         h.on_any_event(FileModifiedEvent("/proj/a.py"))
-        time.sleep(DEBOUNCE + 0.05)  # first reindex now running
+        _wait_for(lambda: c.calls >= 1, timeout=2.0)
         assert c.calls == 1  # mid-flight
 
         h.on_any_event(FileModifiedEvent("/proj/b.py"))
-        # First reindex finishes → pending flag triggers immediate rerun.
-        time.sleep(0.5)
+        _wait_for(lambda: c.calls >= 2, timeout=2.0)
         assert c.calls == 2
 
     def test_no_followup_when_no_events_during_reindex(self):

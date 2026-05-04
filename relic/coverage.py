@@ -113,9 +113,11 @@ def compute_coverage(project_root: Path, subprojects: dict) -> dict:
 
 
 def _safe_rel(path: Path, root: Path) -> str:
-    """Return path relative to root, falling back to absolute if outside."""
+    """Return POSIX-style path relative to root, falling back to absolute if outside."""
     try:
-        return str(path.relative_to(root))
+        from pathlib import PurePosixPath
+
+        return PurePosixPath(path.relative_to(root)).as_posix()
     except ValueError:
         return str(path)
 
@@ -136,18 +138,20 @@ def render_coverage(coverage: dict, console: Console, verbose: bool = False) -> 
     kw = 22  # widest key here is "Skipped (no parser)" at 19 chars
     console.print(style.kv("Files indexed", totals["indexed"], key_width=kw))
     console.print(style.kv("Skipped (no parser)", totals["no_parser"], key_width=kw))
-    console.print(style.kv(
-        f"Skipped (>{MAX_FILE_BYTES // 1000} KB)", totals["too_large"], key_width=kw,
-    ))
+    console.print(
+        style.kv(
+            f"Skipped (>{MAX_FILE_BYTES // 1000} KB)",
+            totals["too_large"],
+            key_width=kw,
+        )
+    )
     console.print(style.kv("Skipped (symlinks)", totals["symlink"], key_width=kw))
     console.print(style.kv("Coverage %", f"{coverage_pct:.1f}", key_width=kw))
 
     for name, entry in coverage["subprojects"].items():
         if entry["missing"]:
             console.print()
-            console.print(style.warn(
-                f"[bold {style.WARN}]{name}[/]: path missing — skipped."
-            ))
+            console.print(style.warn(f"[bold {style.WARN}]{name}[/]: path missing — skipped."))
             continue
 
         skipped = entry["skipped"]
@@ -155,9 +159,7 @@ def render_coverage(coverage: dict, console: Console, verbose: bool = False) -> 
         too_large = skipped["too_large"]
         symlink = skipped["symlink"]
 
-        sub_total = (
-            len(entry["indexed"]) + len(no_parser) + len(too_large) + len(symlink)
-        )
+        sub_total = len(entry["indexed"]) + len(no_parser) + len(too_large) + len(symlink)
 
         console.print()
         console.print(
@@ -187,6 +189,4 @@ def _render_bucket(console: Console, title: str, items: list[str], verbose: bool
     for item in visible:
         console.print(f"     [{style.FG}]{item}[/]")
     if not verbose and len(items) > _EXAMPLE_LIMIT:
-        console.print(
-            f"     [{style.DIM}]… and {len(items) - _EXAMPLE_LIMIT} more (use --verbose)[/]"
-        )
+        console.print(f"     [{style.DIM}]… and {len(items) - _EXAMPLE_LIMIT} more (use --verbose)[/]")

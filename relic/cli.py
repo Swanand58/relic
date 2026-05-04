@@ -48,9 +48,7 @@ def _load_config() -> dict:
     Exits with an error message if the file is missing or malformed.
     """
     if not CONFIG_FILE.exists():
-        console.print(style.error(
-            f"{CONFIG_FILE} not found. Create one in the project root to use relic."
-        ))
+        console.print(style.error(f"{CONFIG_FILE} not found. Create one in the project root to use relic."))
         raise SystemExit(1)
     try:
         with CONFIG_FILE.open(encoding="utf-8") as fh:
@@ -82,9 +80,7 @@ def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
 def project_init() -> None:
     """Auto-discover subprojects and generate relic.yaml. Adds relic entries to .gitignore."""
     if CONFIG_FILE.exists():
-        console.print(style.warn(
-            f"{CONFIG_FILE} already exists — delete it first to re-initialise."
-        ))
+        console.print(style.warn(f"{CONFIG_FILE} already exists — delete it first to re-initialise."))
         raise SystemExit(1)
 
     console.print(style.header("init"))
@@ -95,9 +91,7 @@ def project_init() -> None:
         subprojects = discover_subprojects(PROJECT_ROOT)
 
     if not subprojects:
-        console.print(style.error(
-            "no subprojects found. Create relic.yaml manually and define your subprojects."
-        ))
+        console.print(style.error("no subprojects found. Create relic.yaml manually and define your subprojects."))
         raise SystemExit(1)
 
     config = {"subprojects": subprojects}
@@ -115,12 +109,8 @@ def project_init() -> None:
     _add_to_gitignore(PROJECT_ROOT, ["relic.yaml", ".knowledge/"])
 
     console.print()
-    console.print(style.success(
-        f"[bold]{CONFIG_FILE}[/] created with {len(subprojects)} subproject(s)"
-    ))
-    console.print(style.dim(
-        "   relic.yaml and .knowledge/ are personal — gitignored."
-    ))
+    console.print(style.success(f"[bold]{CONFIG_FILE}[/] created with {len(subprojects)} subproject(s)"))
+    console.print(style.dim("   relic.yaml and .knowledge/ are personal — gitignored."))
     console.print()
     console.print(style.dim("next:"))
     arrow = style.ARROW
@@ -184,7 +174,9 @@ def query_cmd(
     abs_target = Path(target)
     if abs_target.is_absolute():
         try:
-            path_candidates.append(str(abs_target.relative_to(PROJECT_ROOT)))
+            from pathlib import PurePosixPath
+
+            path_candidates.append(PurePosixPath(abs_target.relative_to(PROJECT_ROOT)).as_posix())
         except ValueError:
             pass
 
@@ -195,10 +187,7 @@ def query_cmd(
             break
 
     if node_id is None:
-        symbol_matches = [
-            n for n, d in G.nodes(data=True)
-            if d.get("ntype") == "symbol" and d.get("name") == target
-        ]
+        symbol_matches = [n for n, d in G.nodes(data=True) if d.get("ntype") == "symbol" and d.get("name") == target]
         if not symbol_matches:
             console.print(style.error(f"not found: '{target}'"))
             suggestions = suggest_close_matches(G, target)
@@ -206,18 +195,19 @@ def query_cmd(
                 console.print(style.dim("   did you mean?"))
                 for s in suggestions:
                     console.print(f"      [bold {style.SECONDARY}]{s}[/]")
-            console.print(style.dim(
-                "   try `relic search <name>` to explore, "
-                "or `relic index` if the file was added recently."
-            ))
+            console.print(
+                style.dim("   try `relic search <name>` to explore, or `relic index` if the file was added recently.")
+            )
             raise SystemExit(1)
         if len(symbol_matches) > 1:
             cand_data = [G.nodes[n] for n in symbol_matches]
             print(candidates_to_toon(target, cand_data))
-            err_console.print(style.dim(
-                f"ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
-                f"re-run with the file path to scope the query"
-            ))
+            err_console.print(
+                style.dim(
+                    f"ambiguous: '{target}' matches {len(symbol_matches)} symbols — "
+                    f"re-run with the file path to scope the query"
+                )
+            )
             return
         node_id = symbol_matches[0]
 
@@ -251,10 +241,9 @@ def query_cmd(
 
     print(toon)
 
-    err_console.print(style.dim(
-        f"query: {node_id} {style.DOT} {len(file_nodes)} files, "
-        f"{len(symbol_nodes)} symbols, depth={depth}"
-    ))
+    err_console.print(
+        style.dim(f"query: {node_id} {style.DOT} {len(file_nodes)} files, {len(symbol_nodes)} symbols, depth={depth}")
+    )
 
 
 @app.command(name="search")
@@ -262,7 +251,9 @@ def search_cmd(
     query: str = typer.Argument(..., help="Search term — file path or symbol name."),
     kind: str = typer.Option("all", "--kind", "-k", help="Filter results: file, symbol, or all."),
     subproject: Optional[str] = typer.Option(
-        None, "--subproject", "-s",
+        None,
+        "--subproject",
+        "-s",
         help="Restrict results to a single subproject (as named in relic.yaml).",
     ),
     limit: int = typer.Option(20, "--limit", "-l", help="Max results per category."),
@@ -287,23 +278,23 @@ def search_cmd(
         available = available_subprojects(G)
         if subproject not in available:
             avail_str = ", ".join(sorted(available)) or "(none indexed)"
-            console.print(style.error(
-                f"no such subproject {subproject!r}. available: {avail_str}."
-            ))
+            console.print(style.error(f"no such subproject {subproject!r}. available: {avail_str}."))
             raise SystemExit(1)
 
     file_matches, symbol_matches = search_graph(
-        G, query, kind=kind, subproject=subproject, limit=limit  # type: ignore[arg-type]
+        G,
+        query,
+        kind=kind,
+        subproject=subproject,
+        limit=limit,  # type: ignore[arg-type]
     )
 
     print(render_search_toon(query, file_matches, symbol_matches))
 
     suffix = f" {style.DOT} subproject={subproject}" if subproject else ""
-    err_console.print(style.dim(
-        f"search: '{query}' {style.DOT} "
-        f"{len(file_matches)} file(s), {len(symbol_matches)} symbol(s)"
-        f"{suffix}"
-    ))
+    err_console.print(
+        style.dim(f"search: '{query}' {style.DOT} {len(file_matches)} file(s), {len(symbol_matches)} symbol(s){suffix}")
+    )
 
 
 @app.command(name="stats")
@@ -335,9 +326,7 @@ def stats_cmd() -> None:
 
 @app.command(name="watch")
 def watch_cmd(
-    debounce_ms: int = typer.Option(
-        500, "--debounce-ms", help="Coalesce filesystem events within this window."
-    ),
+    debounce_ms: int = typer.Option(500, "--debounce-ms", help="Coalesce filesystem events within this window."),
 ) -> None:
     """Watch source files and rebuild the index on every change.
 
@@ -350,9 +339,7 @@ def watch_cmd(
         console.print(style.error(f"{CONFIG_FILE} not found. run `relic init` first."))
         raise SystemExit(1)
     if not (KNOWLEDGE_DIR / "index.pkl").exists():
-        console.print(style.error(
-            "no index found. run `relic index` once before `relic watch`."
-        ))
+        console.print(style.error("no index found. run `relic index` once before `relic watch`."))
         raise SystemExit(1)
 
     try:
@@ -369,9 +356,7 @@ def watch_cmd(
 
 @app.command(name="coverage")
 def coverage_cmd(
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="List every skipped file, not just samples."
-    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="List every skipped file, not just samples."),
 ) -> None:
     """Show what relic indexed and what it skipped, with reasons.
 
@@ -428,7 +413,13 @@ def benchmark_cmd(
 def main(
     ctx: typer.Context,
     list_all: bool = typer.Option(False, "--list", "-l", help="List all defined subprojects."),
-    init: Optional[str] = typer.Option(None, "--init", "-i", help=f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'.", metavar="AGENT"),
+    init: Optional[str] = typer.Option(
+        None,
+        "--init",
+        "-i",
+        help=(f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'."),
+        metavar="AGENT",
+    ),
     update: bool = typer.Option(False, "--update", "-u", help="Pull latest from GitHub (main branch) and reinstall."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
@@ -443,9 +434,7 @@ def main(
         elif init in AGENTS:
             init_agent(init, PROJECT_ROOT)
         else:
-            console.print(style.error(
-                f"unknown agent: '{init}' — choose from {', '.join(AGENTS)} or 'all'"
-            ))
+            console.print(style.error(f"unknown agent: '{init}' — choose from {', '.join(AGENTS)} or 'all'"))
             raise SystemExit(1)
         return
 
@@ -454,7 +443,9 @@ def main(
         console.print(style.dim("   pulling latest from main…\n"))
         result = subprocess.run(
             [
-                "uv", "tool", "install",
+                "uv",
+                "tool",
+                "install",
                 "--reinstall",
                 "git+https://github.com/Swanand58/relic@main",
             ],

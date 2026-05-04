@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from io import StringIO
 from pathlib import Path
@@ -47,7 +46,7 @@ class TestComputeCoverage:
         indexed = cov["subprojects"]["app"]["indexed"]
         assert any(p.endswith("good.py") for p in indexed)
         assert any(p.endswith("also_good.ts") for p in indexed)
-        assert any(p.endswith(os.path.join("nested", "inner.py")) for p in indexed)
+        assert any(p.endswith("nested/inner.py") for p in indexed)
 
     def test_no_parser_bucket_collects_md_and_yaml(self, tmp_path: Path):
         root, subprojects = _make_subproject(tmp_path)
@@ -92,9 +91,7 @@ class TestComputeCoverage:
         assert any(p.endswith("linked.py") for p in symlinks)
 
     def test_missing_subproject_path_marked(self, tmp_path: Path):
-        cov = compute_coverage(
-            tmp_path, {"ghost": {"path": "./does/not/exist", "description": ""}}
-        )
+        cov = compute_coverage(tmp_path, {"ghost": {"path": "./does/not/exist", "description": ""}})
         assert cov["subprojects"]["ghost"]["missing"] is True
         assert cov["subprojects"]["ghost"]["indexed"] == []
 
@@ -144,9 +141,7 @@ class TestRenderCoverage:
         src.mkdir()
         for i in range(12):
             (src / f"doc_{i}.md").write_text("x", encoding="utf-8")
-        cov = compute_coverage(
-            tmp_path, {"app": {"path": "./src", "description": ""}}
-        )
+        cov = compute_coverage(tmp_path, {"app": {"path": "./src", "description": ""}})
         non_verbose = self._capture(cov, verbose=False)
         verbose = self._capture(cov, verbose=True)
         assert "more (use --verbose)" in non_verbose

@@ -151,6 +151,7 @@ def run_watch(
     The function returns when the user sends Ctrl+C. Any other exception bubbles
     up so the CLI layer can render it.
     """
+
     def _do_reindex() -> None:
         t0 = time.monotonic()
         G = run_index(project_root, knowledge_dir, config_file)

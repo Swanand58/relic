@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new capability or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Relic ships small. Before you propose a feature, please skim the
+        roadmap in `PLAN.md` and the existing issues. Features that increase
+        token cost or add LLM calls are unlikely to land.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you solving?
+      description: Describe the user / agent pain point. No solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Sketch the command, MCP tool, or behaviour change you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds, similar tools, or simpler designs.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This stays static — no LLM calls, no network, no telemetry.
+        - label: This does not increase the token cost of `relic_query` for the average case.

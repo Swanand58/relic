@@ -12,13 +12,15 @@ Reference: https://toonformat.dev
 
 from __future__ import annotations
 
-import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    import networkx as nx
 
 # ---------------------------------------------------------------------------
 # Primitive helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe(value: Any) -> str:
     """Render a primitive value safe for a TOON cell (no commas or newlines)."""
@@ -34,6 +36,7 @@ def _safe(value: Any) -> str:
 # ---------------------------------------------------------------------------
 # TOON writer
 # ---------------------------------------------------------------------------
+
 
 class ToonWriter:
     """Builds a TOON document section by section."""
@@ -76,6 +79,7 @@ class ToonWriter:
 # ---------------------------------------------------------------------------
 # Knowledge graph → TOON
 # ---------------------------------------------------------------------------
+
 
 def subgraph_to_toon(
     focus_path: str,
@@ -168,25 +172,19 @@ def candidates_to_toon(target: str, candidates: list[dict]) -> str:
     w.table(
         "candidates",
         ["name", "type", "file", "line"],
-        [
-            [d.get("name", ""), d.get("stype", ""), d.get("path", ""), d.get("line", 0)]
-            for d in candidates
-        ],
+        [[d.get("name", ""), d.get("stype", ""), d.get("path", ""), d.get("line", 0)] for d in candidates],
     )
     return w.build().strip()
 
 
-def full_index_to_toon(G: "nx.DiGraph") -> str:  # type: ignore[name-defined]
+def full_index_to_toon(G: nx.DiGraph) -> str:
     """Render the entire graph as a TOON document (human-readable index)."""
-    import networkx as nx
 
     w = ToonWriter()
     w.comment("Relic knowledge graph — full index").blank()
 
     file_rows = [
-        [d["path"], d["language"], d["subproject"]]
-        for _, d in sorted(G.nodes(data=True))
-        if d.get("ntype") == "file"
+        [d["path"], d["language"], d["subproject"]] for _, d in sorted(G.nodes(data=True)) if d.get("ntype") == "file"
     ]
     if file_rows:
         w.table("files", ["path", "language", "subproject"], file_rows).blank()
@@ -199,19 +197,11 @@ def full_index_to_toon(G: "nx.DiGraph") -> str:  # type: ignore[name-defined]
     if sym_rows:
         w.table("symbols", ["name", "type", "file", "line"], sym_rows).blank()
 
-    import_rows = [
-        [u, v]
-        for u, v, d in sorted(G.edges(data=True))
-        if d.get("etype") == "imports"
-    ]
+    import_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "imports"]
     if import_rows:
         w.table("imports", ["from", "to"], import_rows).blank()
 
-    extends_rows = [
-        [u, v]
-        for u, v, d in sorted(G.edges(data=True))
-        if d.get("etype") == "extends"
-    ]
+    extends_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "extends"]
     if extends_rows:
         w.table("extends", ["child", "parent"], extends_rows).blank()
 

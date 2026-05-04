@@ -17,10 +17,10 @@ from relic.mcp_server import (
     list_tools,
 )
 
-
 # ---------------------------------------------------------------------------
 # _resolve_node — file path single-match, symbol multi-match
 # ---------------------------------------------------------------------------
+
 
 class TestResolveNode:
     def test_file_path_returns_single_match(self, sample_graph):
@@ -56,6 +56,7 @@ class TestResolveNode:
 # ---------------------------------------------------------------------------
 # _handle_query — disambiguation path
 # ---------------------------------------------------------------------------
+
 
 class TestHandleQuery:
     def test_missing_target_returns_error(self, tmp_project: Path):
@@ -116,6 +117,7 @@ class TestHandleQuery:
 # _handle_search — delegates to search_graph
 # ---------------------------------------------------------------------------
 
+
 class TestHandleSearch:
     def test_missing_query_returns_error(self, tmp_project: Path):
         out = _handle_search({})
@@ -152,6 +154,7 @@ class TestHandleSearch:
 # Tool registry — descriptions must stay imperative / specific
 # ---------------------------------------------------------------------------
 
+
 class TestToolDescriptions:
     """Pin the imperative wording of each MCP tool description.
 
@@ -166,9 +169,7 @@ class TestToolDescriptions:
 
     def test_all_four_tools_registered(self):
         tools = self._tools_by_name()
-        assert set(tools.keys()) == {
-            "relic_query", "relic_search", "relic_reindex", "relic_stats"
-        }
+        assert set(tools.keys()) == {"relic_query", "relic_search", "relic_reindex", "relic_stats"}
 
     def test_query_describes_disambiguation(self):
         tools = self._tools_by_name()
@@ -201,15 +202,13 @@ class TestToolDescriptions:
 # turn would miss the cache and pay full price for ~360 tokens.
 # ---------------------------------------------------------------------------
 
+
 class TestToolDefinitionStability:
     def _serialize(self):
         tools = asyncio.run(list_tools())
         # Serialise the parts an LLM would actually see: name, description,
         # and inputSchema. Reduces noise from non-payload Tool fields.
-        return [
-            (t.name, t.description, str(t.inputSchema))
-            for t in tools
-        ]
+        return [(t.name, t.description, str(t.inputSchema)) for t in tools]
 
     def test_two_calls_produce_identical_output(self):
         first = self._serialize()
@@ -231,10 +230,11 @@ class TestToolDefinitionStability:
     def test_no_dynamic_content_in_descriptions(self):
         # Belt-and-braces: scan each description for known leaky patterns.
         import re
+
         suspicious = re.compile(
-            r"(\d{4}-\d{2}-\d{2})|"   # timestamp
+            r"(\d{4}-\d{2}-\d{2})|"  # timestamp
             r"(/Users/|/home/|C:\\)|"  # absolute path
-            r"\b\d{2}:\d{2}:\d{2}\b"   # clock time
+            r"\b\d{2}:\d{2}:\d{2}\b"  # clock time
         )
         tools = asyncio.run(list_tools())
         for t in tools:

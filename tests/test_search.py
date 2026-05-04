@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from relic.search import (
     SCORE_EXACT,
     SCORE_PREFIX,
@@ -16,10 +14,10 @@ from relic.search import (
     suggest_close_matches,
 )
 
-
 # ---------------------------------------------------------------------------
 # _score primitive
 # ---------------------------------------------------------------------------
+
 
 class TestScore:
     def test_exact_match_wins(self):
@@ -41,6 +39,7 @@ class TestScore:
 # ---------------------------------------------------------------------------
 # search_graph — file/symbol matching, ranking, filtering
 # ---------------------------------------------------------------------------
+
 
 class TestSearchGraph:
     def test_empty_query_returns_empty(self, sample_graph):
@@ -127,6 +126,7 @@ class TestSearchGraph:
 # render_search_toon — output formatting
 # ---------------------------------------------------------------------------
 
+
 class TestRenderSearchToon:
     def test_no_results_returns_plain_string(self):
         out = render_search_toon("ghost", [], [])
@@ -160,6 +160,7 @@ class TestRenderSearchToon:
 # available_subprojects — used for input validation
 # ---------------------------------------------------------------------------
 
+
 class TestAvailableSubprojects:
     def test_returns_unique_subprojects(self, sample_graph):
         result = available_subprojects(sample_graph)
@@ -172,12 +173,14 @@ class TestAvailableSubprojects:
 
     def test_empty_graph_returns_empty_set(self):
         import networkx as nx
+
         assert available_subprojects(nx.DiGraph()) == set()
 
 
 # ---------------------------------------------------------------------------
 # _normalize — bridges snake_case / kebab-case / camelCase
 # ---------------------------------------------------------------------------
+
 
 class TestNormalize:
     def test_lowercases(self):
@@ -203,6 +206,7 @@ class TestNormalize:
 # suggest_close_matches — "did you mean?" for unresolved query targets
 # ---------------------------------------------------------------------------
 
+
 class TestSuggestCloseMatches:
     def test_empty_target_returns_empty(self, sample_graph):
         assert suggest_close_matches(sample_graph, "") == []
@@ -220,8 +224,7 @@ class TestSuggestCloseMatches:
     def test_labels_distinguish_files_and_symbols(self, sample_graph):
         suggestions = suggest_close_matches(sample_graph, "process")
         # files use `file:` prefix, symbols use `symbol:` prefix
-        assert any(s.startswith("file:") for s in suggestions) or \
-               any(s.startswith("symbol:") for s in suggestions)
+        assert any(s.startswith("file:") for s in suggestions) or any(s.startswith("symbol:") for s in suggestions)
         for s in suggestions:
             assert s.startswith(("file:", "symbol:"))
 

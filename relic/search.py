@@ -61,11 +61,13 @@ def suggest_close_matches(G: nx.DiGraph, target: str, limit: int = 3) -> list[st
         elif ntype == "symbol":
             score = _score(_normalize(d.get("name", "")), needle)
             if score:
-                candidates.append((
-                    score,
-                    G.degree(n),
-                    f"symbol: {d.get('name', '')} ({d.get('path', '')})",
-                ))
+                candidates.append(
+                    (
+                        score,
+                        G.degree(n),
+                        f"symbol: {d.get('name', '')} ({d.get('path', '')})",
+                    )
+                )
 
     candidates.sort(key=lambda item: (-item[0], -item[1]))
     return [label for _, _, label in candidates[:limit]]
@@ -77,11 +79,7 @@ def available_subprojects(G: nx.DiGraph) -> set[str]:
     Used by callers to validate `--subproject` arguments and surface a useful
     error instead of returning silently empty results.
     """
-    return {
-        d["subproject"]
-        for _, d in G.nodes(data=True)
-        if d.get("ntype") == "file" and d.get("subproject")
-    }
+    return {d["subproject"] for _, d in G.nodes(data=True) if d.get("ntype") == "file" and d.get("subproject")}
 
 
 def _score(haystack: str, needle: str) -> int:
@@ -115,9 +113,7 @@ def search_graph(
         return [], []
 
     file_subproject: dict[str, str] = {
-        n: d.get("subproject", "")
-        for n, d in G.nodes(data=True)
-        if d.get("ntype") == "file"
+        n: d.get("subproject", "") for n, d in G.nodes(data=True) if d.get("ntype") == "file"
     }
 
     file_hits: list[tuple[int, int, dict]] = []
@@ -168,20 +164,14 @@ def render_search_toon(
         w.table(
             "file_matches",
             ["path", "language", "subproject"],
-            [
-                [d.get("path", ""), d.get("language", ""), d.get("subproject", "")]
-                for d in file_matches
-            ],
+            [[d.get("path", ""), d.get("language", ""), d.get("subproject", "")] for d in file_matches],
         ).blank()
 
     if symbol_matches:
         w.table(
             "symbol_matches",
             ["name", "type", "file"],
-            [
-                [d.get("name", ""), d.get("stype", ""), d.get("path", "")]
-                for d in symbol_matches
-            ],
+            [[d.get("name", ""), d.get("stype", ""), d.get("path", "")] for d in symbol_matches],
         ).blank()
 
     return w.build().strip()

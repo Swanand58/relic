@@ -10,10 +10,10 @@ from relic.toon import (
     subgraph_to_toon,
 )
 
-
 # ---------------------------------------------------------------------------
 # _safe — primitive cell rendering
 # ---------------------------------------------------------------------------
+
 
 class TestSafe:
     def test_plain_value_unchanged(self):
@@ -42,17 +42,22 @@ class TestSafe:
 # ToonWriter — fluent builder
 # ---------------------------------------------------------------------------
 
+
 class TestToonWriter:
     def test_kv_emits_key_value(self):
         out = ToonWriter().kv("focus", "src/foo.py").build()
         assert out == "focus: src/foo.py"
 
     def test_table_with_rows(self):
-        out = ToonWriter().table(
-            "files",
-            ["path", "lang"],
-            [["a.py", "python"], ["b.ts", "typescript"]],
-        ).build()
+        out = (
+            ToonWriter()
+            .table(
+                "files",
+                ["path", "lang"],
+                [["a.py", "python"], ["b.ts", "typescript"]],
+            )
+            .build()
+        )
         assert "files[2]{path,lang}:" in out
         assert "  a.py,python" in out
         assert "  b.ts,typescript" in out
@@ -75,6 +80,7 @@ class TestToonWriter:
 # ---------------------------------------------------------------------------
 # candidates_to_toon — disambiguation list
 # ---------------------------------------------------------------------------
+
 
 class TestCandidatesToToon:
     def _candidates(self):
@@ -106,6 +112,7 @@ class TestCandidatesToToon:
 # ---------------------------------------------------------------------------
 # subgraph_to_toon — full pre-edit context block
 # ---------------------------------------------------------------------------
+
 
 class TestSubgraphToToon:
     def test_basic_focus_only(self):
@@ -199,6 +206,7 @@ class TestSubgraphToToon:
 # ---------------------------------------------------------------------------
 # full_index_to_toon — sanity check, used by `relic index`
 # ---------------------------------------------------------------------------
+
 
 class TestFullIndexToon:
     def test_renders_files_section(self, sample_graph):

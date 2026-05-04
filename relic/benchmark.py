@@ -16,7 +16,6 @@ from pathlib import Path
 from rich.console import Console
 from rich.rule import Rule
 from rich.table import Table
-from rich.text import Text
 
 from relic.indexer import load_graph
 from relic.toon import subgraph_to_toon
@@ -52,7 +51,9 @@ def run_benchmark(target: str, project_root: Path, knowledge_dir: Path, depth: i
     candidates = [target, target_norm, str(Path(target))]
     if abs_target.is_absolute():
         try:
-            candidates.append(str(abs_target.relative_to(project_root)))
+            from pathlib import PurePosixPath
+
+            candidates.append(PurePosixPath(abs_target.relative_to(project_root)).as_posix())
         except ValueError:
             pass
 
@@ -142,7 +143,11 @@ def run_benchmark(target: str, project_root: Path, knowledge_dir: Path, depth: i
     for path, reason, tok in manual_files:
         t_without.add_row(path, reason, f"{tok:,}")
     t_without.add_row("", "", "")
-    t_without.add_row("[bold]Total[/bold]", f"[bold]{len(manual_files)} files[/bold]", f"[bold yellow]{manual_total_tokens:,}[/bold yellow]")
+    t_without.add_row(
+        "[bold]Total[/bold]",
+        f"[bold]{len(manual_files)} files[/bold]",
+        f"[bold yellow]{manual_total_tokens:,}[/bold yellow]",
+    )
     console.print(t_without)
     console.print()
 
@@ -160,7 +165,11 @@ def run_benchmark(target: str, project_root: Path, knowledge_dir: Path, depth: i
     t_with.add_column("Component")
     t_with.add_column("Detail", style="dim")
     t_with.add_column("~Tokens", justify="right", style="green")
-    t_with.add_row("TOON context (auto-injected)", f"depth={depth}, {len(file_nodes)} files, {len(symbol_nodes)} symbols", f"{toon_tokens:,}")
+    t_with.add_row(
+        "TOON context (auto-injected)",
+        f"depth={depth}, {len(file_nodes)} files, {len(symbol_nodes)} symbols",
+        f"{toon_tokens:,}",
+    )
     t_with.add_row("Focus file read", node_id, f"{focus_tokens:,}")
     t_with.add_row("", "", "")
     t_with.add_row("[bold]Total[/bold]", "", f"[bold green]{with_relic_tokens:,}[/bold green]")

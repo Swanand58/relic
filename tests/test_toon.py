@@ -154,17 +154,32 @@ class TestSubgraphToToon:
                 {"path": "src/bar.py", "language": "python", "subproject": "app"},
             ],
             symbol_nodes=[
-                {"name": "Foo", "stype": "class", "path": "src/foo.py", "line": 1},
-                {"name": "Bar", "stype": "class", "path": "src/bar.py", "line": 1},
+                {"name": "Foo", "stype": "class", "path": "src/foo.py", "line": 1, "signature": "Foo"},
+                {"name": "Bar", "stype": "class", "path": "src/bar.py", "line": 1, "signature": "Bar"},
             ],
             import_edges=[],
             define_edges=[],
             extends_edges=[],
         )
-        assert "exports[1]{name,type,line}:" in out
-        assert "Foo,class,1" in out
-        # neighbor symbols rendered separately
+        assert "exports[1]{name,type,line,signature}:" in out
+        assert "Foo,class,1,Foo" in out
         assert "neighbor_symbols" in out
+
+    def test_tested_by_rendered_for_focus(self):
+        out = subgraph_to_toon(
+            focus_path="src/foo.py",
+            file_nodes=[
+                {"path": "src/foo.py", "language": "python", "subproject": "app"},
+                {"path": "tests/test_foo.py", "language": "python", "subproject": "app"},
+            ],
+            symbol_nodes=[],
+            import_edges=[],
+            define_edges=[],
+            extends_edges=[],
+            tested_by_edges=[("src/foo.py", "tests/test_foo.py")],
+        )
+        assert "tested_by[1]{source,test}:" in out
+        assert "src/foo.py,tests/test_foo.py" in out
 
     def test_imports_filtered_to_focus(self):
         out = subgraph_to_toon(

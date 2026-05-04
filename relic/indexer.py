@@ -2,10 +2,11 @@
 
 No LLM involved. Extracts:
 - File nodes with language and subproject metadata
-- Symbol nodes (classes, functions, interfaces, types)
+- Symbol nodes (classes, functions, interfaces, types) with signatures
 - Import edges between files
 - Define edges from files to their symbols
-- Extends edges between symbols
+- Extends edges between symbols (Python + TypeScript)
+- Test mapping edges (tested_by / tests) via naming conventions
 
 Languages supported:
 - Python     — stdlib ast (accurate)
@@ -29,11 +30,15 @@ Node attributes:
     stype    : "class" | "function" | "interface" | "type" | "variable"
     path     : file that defines this symbol
     line     : line number (0 if unknown)
+    signature: parameter/return-type signature (empty string if unavailable)
 
 Edge types:
-    imports  : file  → file    (file A imports from file B)
-    defines  : file  → symbol  (file A defines symbol S)
-    extends  : symbol → symbol (class A extends class B)
+    imports   : file  → file    (file A imports from file B)
+    defines   : file  → symbol  (file A defines symbol S)
+    extends   : symbol → symbol (class A extends class B)
+    uses      : file  → symbol  (file A references symbol S from another file)
+    tested_by : file  → file    (source file → its test file)
+    tests     : file  → file    (test file → the source it tests)
 """
 
 import ast
@@ -95,25 +100,62 @@ MAX_FILE_BYTES = 200_000
 # ---------------------------------------------------------------------------
 
 
-def _analyse_python(source: str, rel_path: str, project_root: Path) -> tuple[list[str], list[dict]]:
+def _extract_python_signature(node: ast.AST, source_lines: list[str]) -> str:
+    """Extract a compact signature from a Python AST def/class node.
+
+    For functions: ``name(params) -> ReturnType``
+    For classes:   ``Name(Base1, Base2)``
+    """
+    if isinstance(node, ast.ClassDef):
+        if not node.bases:
+            return node.name
+        bases = []
+        for b in node.bases:
+            try:
+                bases.append(ast.unparse(b))
+            except Exception:
+                bases.append("?")
+        return f"{node.name}({', '.join(bases)})"
+
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        try:
+            args_str = ast.unparse(node.args)
+        except Exception:
+            args_str = "..."
+        ret = ""
+        if node.returns:
+            try:
+                ret = f" -> {ast.unparse(node.returns)}"
+            except Exception:
+                pass
+        return f"{node.name}({args_str}){ret}"
+
+    return ""
+
+
+def _analyse_python(
+    source: str, rel_path: str, project_root: Path
+) -> tuple[list[str], list[dict], list[tuple[str, str]]]:
     """Parse Python source with ast.
 
     Returns:
-        imports  — list of resolved relative paths this file imports
-        symbols  — list of dicts {name, stype, line}
+        imports        — list of resolved relative paths this file imports
+        symbols        — list of dicts {name, stype, line, signature, extends?}
+        imported_names — list of (resolved_path, symbol_name) from ``from X import Y``
     """
     imports: list[str] = []
     symbols: list[dict] = []
+    imported_names: list[tuple[str, str]] = []
 
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return imports, symbols
+        return imports, symbols, imported_names
 
+    source_lines = source.splitlines()
     file_dir = (project_root / rel_path).parent
 
     for node in ast.walk(tree):
-        # Imports
         if isinstance(node, ast.Import):
             for alias in node.names:
                 resolved = _resolve_python_import(alias.name, file_dir, project_root)
@@ -130,16 +172,32 @@ def _analyse_python(source: str, rel_path: str, project_root: Path) -> tuple[lis
                 )
                 if resolved:
                     imports.append(resolved)
+                    if node.names:
+                        for alias in node.names:
+                            if alias.name != "*":
+                                imported_names.append((resolved, alias.name))
 
-        # Symbols — top-level only to avoid noise
         elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             if isinstance(node, ast.ClassDef):
                 stype = "class"
             else:
                 stype = "function"
-            symbols.append({"name": node.name, "stype": stype, "line": node.lineno})
+            sym: dict = {
+                "name": node.name,
+                "stype": stype,
+                "line": node.lineno,
+                "signature": _extract_python_signature(node, source_lines),
+            }
+            if isinstance(node, ast.ClassDef) and node.bases:
+                for b in node.bases:
+                    try:
+                        sym["extends"] = ast.unparse(b)
+                        break
+                    except Exception:
+                        pass
+            symbols.append(sym)
 
-    return imports, symbols
+    return imports, symbols, imported_names
 
 
 def _resolve_python_import(module: str, file_dir: Path, project_root: Path, level: int = 0) -> str | None:
@@ -190,36 +248,78 @@ _TS_IFACE_RE = re.compile(r"""(?:export\s+)?interface\s+(\w+)""")
 _TS_TYPE_RE = re.compile(r"""(?:export\s+)?type\s+(\w+)\s*=""")
 
 
-def _analyse_typescript(source: str, rel_path: str, project_root: Path) -> tuple[list[str], list[dict]]:
+def _ts_func_sig(line: str, name: str) -> str:
+    """Extract a compact TS function signature from the source line.
+
+    Tries to capture ``name(params): RetType`` from the declaration line.
+    Falls back to just the name if parsing is ambiguous.
+    """
+    idx = line.find(name)
+    if idx == -1:
+        return name
+    rest = line[idx:]
+    paren_start = rest.find("(")
+    if paren_start == -1:
+        return name
+    depth = 0
+    for j, ch in enumerate(rest[paren_start:], paren_start):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                after = rest[j + 1 :].strip()
+                if after.startswith(":"):
+                    ret_type = after[1:].split("{")[0].split("=>")[0].strip().rstrip(",;")
+                    if ret_type:
+                        return f"{rest[: j + 1]} -> {ret_type}"
+                return rest[: j + 1]
+    return name
+
+
+_TS_NAMED_IMPORT_RE = re.compile(
+    r"""import\s+(?:type\s+)?\{([^}]+)\}\s*from\s+['"]([^'"]+)['"]""",
+    re.VERBOSE,
+)
+
+
+def _analyse_typescript(
+    source: str, rel_path: str, project_root: Path
+) -> tuple[list[str], list[dict], list[tuple[str, str]]]:
     """Parse TypeScript/JS source with regex.
 
     Returns:
-        imports  — list of resolved relative paths this file imports
-        symbols  — list of dicts {name, stype, line, extends}
+        imports        — list of resolved relative paths this file imports
+        symbols        — list of dicts {name, stype, line, extends}
+        imported_names — list of (resolved_path, symbol_name) from named imports
     """
     imports: list[str] = []
     symbols: list[dict] = []
+    imported_names: list[tuple[str, str]] = []
 
     file_dir = (project_root / rel_path).parent
     lines = source.splitlines()
 
-    # Build line-number index for symbols
     for i, line in enumerate(lines, 1):
+        stripped = line.strip()
         for m in _TS_CLASS_RE.finditer(line):
-            sym = {"name": m.group(1), "stype": "class", "line": i}
+            name = m.group(1)
+            sig = f"{name}({m.group(2)})" if m.group(2) else name
+            sym = {"name": name, "stype": "class", "line": i, "signature": sig}
             if m.group(2):
                 sym["extends"] = m.group(2)
             symbols.append(sym)
         for m in _TS_FUNC_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "function", "line": i})
+            sig = _ts_func_sig(stripped, m.group(1))
+            symbols.append({"name": m.group(1), "stype": "function", "line": i, "signature": sig})
         for m in _TS_ARROW_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "function", "line": i})
+            sig = _ts_func_sig(stripped, m.group(1))
+            symbols.append({"name": m.group(1), "stype": "function", "line": i, "signature": sig})
         for m in _TS_IFACE_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "interface", "line": i})
+            symbols.append({"name": m.group(1), "stype": "interface", "line": i, "signature": m.group(1)})
         for m in _TS_TYPE_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "type", "line": i})
+            symbols.append({"name": m.group(1), "stype": "type", "line": i, "signature": m.group(1)})
 
-    # Imports
     for pattern in (_TS_IMPORT_RE, _TS_REQUIRE_RE):
         for m in pattern.finditer(source):
             spec = m.group(1)
@@ -227,7 +327,18 @@ def _analyse_typescript(source: str, rel_path: str, project_root: Path) -> tuple
             if resolved:
                 imports.append(resolved)
 
-    return imports, symbols
+    for m in _TS_NAMED_IMPORT_RE.finditer(source):
+        names_str, spec = m.group(1), m.group(2)
+        resolved = _resolve_ts_import(spec, file_dir, project_root)
+        if resolved:
+            for name_part in names_str.split(","):
+                name_part = name_part.strip()
+                if " as " in name_part:
+                    name_part = name_part.split(" as ")[0].strip()
+                if name_part:
+                    imported_names.append((resolved, name_part))
+
+    return imports, symbols, imported_names
 
 
 _TS_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
@@ -299,6 +410,108 @@ def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[P
     return results
 
 
+_TEST_PREFIXES = ("test_", "tests_")
+_TEST_SUFFIXES = ("_test", ".test", ".spec")
+
+
+def _test_candidate_names(path: str) -> list[str]:
+    """Given a source file path, return possible test file paths (POSIX)."""
+    from pathlib import PurePosixPath
+
+    p = PurePosixPath(path)
+    stem = p.stem
+    suffix = p.suffix
+    parent = str(p.parent)
+    candidates: list[str] = []
+
+    # test_foo.py in same dir, tests/ dir, test/ dir
+    for prefix in _TEST_PREFIXES:
+        candidates.append(f"{parent}/{prefix}{stem}{suffix}")
+    for test_dir in ("tests", "test"):
+        for prefix in _TEST_PREFIXES:
+            candidates.append(f"{test_dir}/{prefix}{stem}{suffix}")
+            if parent != ".":
+                candidates.append(f"{parent}/{test_dir}/{prefix}{stem}{suffix}")
+
+    # foo_test.py, foo.test.ts, foo.spec.ts in same dir
+    for sfx in _TEST_SUFFIXES:
+        candidates.append(f"{parent}/{stem}{sfx}{suffix}")
+
+    # __tests__/foo.ts (JS/TS convention)
+    candidates.append(f"{parent}/__tests__/{stem}{suffix}")
+
+    return candidates
+
+
+def _source_candidate_names(test_path: str) -> list[str]:
+    """Given a test file path, return possible source file paths (POSIX)."""
+    from pathlib import PurePosixPath
+
+    p = PurePosixPath(test_path)
+    stem = p.stem
+    suffix = p.suffix
+    parent = str(p.parent)
+    candidates: list[str] = []
+
+    # Strip test_ prefix
+    for prefix in _TEST_PREFIXES:
+        if stem.startswith(prefix):
+            base = stem[len(prefix) :]
+            candidates.append(f"{parent}/{base}{suffix}")
+            # source might be one dir up from tests/
+            pp = PurePosixPath(parent)
+            if pp.name in ("tests", "test", "__tests__"):
+                candidates.append(f"{pp.parent}/{base}{suffix}")
+
+    # Strip _test, .test, .spec suffix
+    for sfx in _TEST_SUFFIXES:
+        if stem.endswith(sfx):
+            base = stem[: -len(sfx)]
+            candidates.append(f"{parent}/{base}{suffix}")
+            pp = PurePosixPath(parent)
+            if pp.name in ("tests", "test", "__tests__"):
+                candidates.append(f"{pp.parent}/{base}{suffix}")
+
+    return candidates
+
+
+def _is_test_file(path: str) -> bool:
+    """Heuristic: does this path look like a test file?"""
+    from pathlib import PurePosixPath
+
+    stem = PurePosixPath(path).stem
+    for prefix in _TEST_PREFIXES:
+        if stem.startswith(prefix):
+            return True
+    for sfx in _TEST_SUFFIXES:
+        if stem.endswith(sfx):
+            return True
+    parts = PurePosixPath(path).parts
+    return "__tests__" in parts
+
+
+def _add_test_mapping(G: nx.DiGraph) -> None:
+    """Add tested_by / tests edges between source and test files."""
+    file_nodes = {n for n, d in G.nodes(data=True) if d.get("ntype") == "file"}
+    already_paired: set[tuple[str, str]] = set()
+
+    for node in file_nodes:
+        if _is_test_file(node):
+            for candidate in _source_candidate_names(node):
+                if candidate in file_nodes and (candidate, node) not in already_paired:
+                    G.add_edge(candidate, node, etype="tested_by")
+                    G.add_edge(node, candidate, etype="tests")
+                    already_paired.add((candidate, node))
+                    break
+        else:
+            for candidate in _test_candidate_names(node):
+                if candidate in file_nodes and (node, candidate) not in already_paired:
+                    G.add_edge(node, candidate, etype="tested_by")
+                    G.add_edge(candidate, node, etype="tests")
+                    already_paired.add((node, candidate))
+                    break
+
+
 def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
     """Build and return the full knowledge graph as a NetworkX DiGraph.
 
@@ -326,20 +539,20 @@ def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
         except (PermissionError, OSError):
             continue
 
+        imported_names: list[tuple[str, str]] = []
         if lang == "python":
-            imports, symbols = _analyse_python(source, rel, project_root)
+            imports, symbols, imported_names = _analyse_python(source, rel, project_root)
         elif lang in ("typescript", "javascript"):
-            imports, symbols = _analyse_typescript(source, rel, project_root)
+            imports, symbols, imported_names = _analyse_typescript(source, rel, project_root)
         else:
             imports, symbols = [], []
 
-        # Import edges — only to files that exist in the project
         for imp in imports:
             if imp in file_nodes and imp != rel:
                 G.add_edge(rel, imp, etype="imports")
 
         # Symbol nodes + define edges
-        symbol_map: dict[str, str] = {}  # name → symbol node ID
+        symbol_map: dict[str, str] = {}
         for sym in symbols:
             sid = f"{sym['name']}@{rel}"
             G.add_node(
@@ -349,25 +562,38 @@ def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
                 stype=sym["stype"],
                 path=rel,
                 line=sym.get("line", 0),
+                signature=sym.get("signature", ""),
             )
             G.add_edge(rel, sid, etype="defines")
             symbol_map[sym["name"]] = sid
 
-        # Extends edges (TS only)
+        # Extends edges (Python + TS)
         for sym in symbols:
             if "extends" in sym:
                 parent_name = sym["extends"]
                 child_sid = f"{sym['name']}@{rel}"
-                # Try to find parent in this file first, then anywhere in graph
                 parent_sid = symbol_map.get(parent_name)
                 if parent_sid is None:
-                    # Search across all symbol nodes
                     for node, data in G.nodes(data=True):
                         if data.get("ntype") == "symbol" and data.get("name") == parent_name:
                             parent_sid = node
                             break
                 if parent_sid:
                     G.add_edge(child_sid, parent_sid, etype="extends")
+
+        # Stash imported_names for uses-edge resolution after all symbols exist
+        if imported_names:
+            G.graph.setdefault("_pending_uses", []).append((rel, imported_names))
+
+    # Third pass — resolve uses edges (file → symbol it imports by name)
+    for importer_rel, name_pairs in G.graph.pop("_pending_uses", []):
+        for target_file, sym_name in name_pairs:
+            sid = f"{sym_name}@{target_file}"
+            if sid in G.nodes:
+                G.add_edge(importer_rel, sid, etype="uses")
+
+    # Fourth pass — test file mapping by naming convention
+    _add_test_mapping(G)
 
     return G
 

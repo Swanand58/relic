@@ -88,12 +88,14 @@ def subgraph_to_toon(
     import_edges: list[tuple[str, str]],
     define_edges: list[tuple[str, str]],
     extends_edges: list[tuple[str, str]],
+    tested_by_edges: list[tuple[str, str]] | None = None,
+    uses_edges: list[tuple[str, str]] | None = None,
 ) -> str:
     """Render a knowledge graph subgraph as a TOON document.
 
     Symbols are split into two sections for token efficiency:
-    - focus_symbols: full detail (name, type, line) for the focus file only
-    - neighbor_symbols: name+type only for all other files (no line noise)
+    - exports: full detail (name, type, line, signature) for the focus file
+    - neighbor_symbols: name, type, file, signature for other files
 
     Neighbor files are listed as paths only — no repeated symbol detail.
     """
@@ -101,7 +103,6 @@ def subgraph_to_toon(
 
     w.kv("focus", focus_path).blank()
 
-    # Neighbor files (everything except the focus file)
     neighbor_files = [f for f in file_nodes if f["path"] != focus_path]
     if neighbor_files:
         w.table(
@@ -110,27 +111,22 @@ def subgraph_to_toon(
             [[f["path"], f["language"], f["subproject"]] for f in neighbor_files],
         ).blank()
 
-    # Symbols defined in the focus file — full detail
     focus_symbols = [s for s in symbol_nodes if s["path"] == focus_path]
     if focus_symbols:
         w.table(
             "exports",
-            ["name", "type", "line"],
-            [[s["name"], s["stype"], s["line"]] for s in focus_symbols],
+            ["name", "type", "line", "signature"],
+            [[s["name"], s["stype"], s["line"], s.get("signature", "")] for s in focus_symbols],
         ).blank()
 
-    # Symbols from neighbor files — name+type only, grouped by file would be ideal
-    # but flat list keeps parser simple; file column retained for lookup
     neighbor_symbols = [s for s in symbol_nodes if s["path"] != focus_path]
     if neighbor_symbols:
         w.table(
             "neighbor_symbols",
-            ["name", "type", "file"],
-            [[s["name"], s["stype"], s["path"]] for s in neighbor_symbols],
+            ["name", "type", "file", "signature"],
+            [[s["name"], s["stype"], s["path"], s.get("signature", "")] for s in neighbor_symbols],
         ).blank()
 
-    # Only show import edges that involve the focus file directly.
-    # Edges between neighbor files are irrelevant noise for pre-edit context.
     focus_imports = [(a, b) for a, b in import_edges if a == focus_path]
     focus_imported_by = [(a, b) for a, b in import_edges if b == focus_path]
 
@@ -148,6 +144,15 @@ def subgraph_to_toon(
             [[a, b] for a, b in focus_imported_by],
         ).blank()
 
+    if tested_by_edges:
+        focus_tested_by = [(a, b) for a, b in tested_by_edges if a == focus_path]
+        if focus_tested_by:
+            w.table(
+                "tested_by",
+                ["source", "test"],
+                [[a, b] for a, b in focus_tested_by],
+            ).blank()
+
     focus_extends = [(a, b) for a, b in extends_edges if a == focus_path or b == focus_path]
     if focus_extends:
         w.table(
@@ -155,6 +160,17 @@ def subgraph_to_toon(
             ["child", "parent"],
             [[a, b] for a, b in focus_extends],
         ).blank()
+
+    # Callers — which files use symbols defined in the focus file
+    if uses_edges:
+        focus_symbol_ids = {f"{s['name']}@{focus_path}" for s in focus_symbols}
+        callers = [(a, b) for a, b in uses_edges if b in focus_symbol_ids and a != focus_path]
+        if callers:
+            w.table(
+                "callers",
+                ["file", "symbol"],
+                [[a, b.split("@")[0]] for a, b in callers],
+            ).blank()
 
     return w.build().strip()
 
@@ -190,12 +206,12 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
         w.table("files", ["path", "language", "subproject"], file_rows).blank()
 
     sym_rows = [
-        [d["name"], d["stype"], d["path"], d["line"]]
+        [d["name"], d["stype"], d["path"], d["line"], d.get("signature", "")]
         for _, d in sorted(G.nodes(data=True))
         if d.get("ntype") == "symbol"
     ]
     if sym_rows:
-        w.table("symbols", ["name", "type", "file", "line"], sym_rows).blank()
+        w.table("symbols", ["name", "type", "file", "line", "signature"], sym_rows).blank()
 
     import_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "imports"]
     if import_rows:
@@ -204,5 +220,13 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
     extends_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "extends"]
     if extends_rows:
         w.table("extends", ["child", "parent"], extends_rows).blank()
+
+    uses_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "uses"]
+    if uses_rows:
+        w.table("uses", ["file", "symbol"], uses_rows).blank()
+
+    tested_by_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "tested_by"]
+    if tested_by_rows:
+        w.table("tested_by", ["source", "test"], tested_by_rows).blank()
 
     return w.build().strip()

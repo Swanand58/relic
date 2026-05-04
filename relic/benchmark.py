@@ -51,7 +51,9 @@ def run_benchmark(target: str, project_root: Path, knowledge_dir: Path, depth: i
     candidates = [target, target_norm, str(Path(target))]
     if abs_target.is_absolute():
         try:
-            candidates.append(str(abs_target.relative_to(project_root)))
+            from pathlib import PurePosixPath
+
+            candidates.append(PurePosixPath(abs_target.relative_to(project_root)).as_posix())
         except ValueError:
             pass
 

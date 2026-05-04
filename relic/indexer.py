@@ -39,10 +39,16 @@ Edge types:
 import ast
 import pickle
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import networkx as nx
 import yaml
+
+
+def _posix_rel(path: Path, root: Path) -> str:
+    """Return a POSIX-style relative path (forward slashes on all platforms)."""
+    return PurePosixPath(path.relative_to(root)).as_posix()
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -157,7 +163,7 @@ def _resolve_python_import(module: str, file_dir: Path, project_root: Path, leve
         else:
             full = candidate / "__init__.py"
         if full.exists():
-            return str(full.relative_to(project_root))
+            return _posix_rel(full, project_root)
     return None
 
 
@@ -237,7 +243,7 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
     # Try exact path first
     if raw.exists() and raw.is_file():
         try:
-            return str(raw.relative_to(project_root))
+            return _posix_rel(raw, project_root)
         except ValueError:
             return None
 
@@ -246,7 +252,7 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
         candidate = Path(str(raw) + ext)
         if candidate.exists():
             try:
-                return str(candidate.relative_to(project_root))
+                return _posix_rel(candidate, project_root)
             except ValueError:
                 return None
 
@@ -255,7 +261,7 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
         candidate = raw / f"index{ext}"
         if candidate.exists():
             try:
-                return str(candidate.relative_to(project_root))
+                return _posix_rel(candidate, project_root)
             except ValueError:
                 return None
 
@@ -304,7 +310,7 @@ def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
 
     # First pass — add all file nodes
     for abs_path, subproject in files:
-        rel = str(abs_path.relative_to(project_root))
+        rel = _posix_rel(abs_path, project_root)
         lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
         G.add_node(rel, ntype="file", path=rel, language=lang, subproject=subproject)
 
@@ -312,7 +318,7 @@ def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
 
     # Second pass — analyse each file
     for abs_path, subproject in files:
-        rel = str(abs_path.relative_to(project_root))
+        rel = _posix_rel(abs_path, project_root)
         lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
 
         try:

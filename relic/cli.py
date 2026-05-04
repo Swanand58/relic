@@ -174,7 +174,9 @@ def query_cmd(
     abs_target = Path(target)
     if abs_target.is_absolute():
         try:
-            path_candidates.append(str(abs_target.relative_to(PROJECT_ROOT)))
+            from pathlib import PurePosixPath
+
+            path_candidates.append(PurePosixPath(abs_target.relative_to(PROJECT_ROOT)).as_posix())
         except ValueError:
             pass
 

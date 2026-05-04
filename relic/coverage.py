@@ -113,9 +113,11 @@ def compute_coverage(project_root: Path, subprojects: dict) -> dict:
 
 
 def _safe_rel(path: Path, root: Path) -> str:
-    """Return path relative to root, falling back to absolute if outside."""
+    """Return POSIX-style path relative to root, falling back to absolute if outside."""
     try:
-        return str(path.relative_to(root))
+        from pathlib import PurePosixPath
+
+        return PurePosixPath(path.relative_to(root)).as_posix()
     except ValueError:
         return str(path)
 

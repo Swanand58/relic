@@ -52,7 +52,8 @@ def _resolve_node(G, target: str) -> list[str]:
     Returns [] when nothing matches.
     """
     target_norm = target.lstrip("./")
-    for candidate in [target, target_norm, str(Path(target))]:
+    posix_norm = target_norm.replace("\\", "/")
+    for candidate in [target, target_norm, posix_norm]:
         if candidate in G.nodes:
             return [candidate]
     matches: list[str] = []

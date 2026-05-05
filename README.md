@@ -70,10 +70,14 @@ Agent knows the structure — including signatures, test files, and callers — 
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/).
+```bash
+pip install relic-graph
+```
+
+Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/Swanand58/relic
+uv tool install relic-graph
 ```
 
 If `relic` is not found after install:
@@ -85,6 +89,12 @@ uv tool update-shell
 Then open a new terminal tab.
 
 ### Upgrade
+
+```bash
+pip install --upgrade relic-graph
+```
+
+Or:
 
 ```bash
 relic --update

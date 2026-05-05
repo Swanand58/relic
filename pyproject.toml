@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "relic"
+name = "relic-graph"
 version = "0.2.0"
 description = "Codebase knowledge management CLI for AI coding agents"
 requires-python = ">=3.11"

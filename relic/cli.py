@@ -6,6 +6,7 @@ the whole tool.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -378,7 +379,7 @@ def main(
         help=(f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'."),
         metavar="AGENT",
     ),
-    update: bool = typer.Option(False, "--update", "-u", help="Pull latest release from GitHub and reinstall."),
+    update: bool = typer.Option(False, "--update", "-u", help="Upgrade to the latest version from PyPI."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
     """Relic — build and query a static knowledge graph for AI coding agents."""
@@ -398,37 +399,28 @@ def main(
 
     if update:
         console.print(style.header("update"))
-        console.print(style.dim("   fetching latest release tag…\n"))
+        console.print(style.dim("   upgrading relic-graph from PyPI…\n"))
 
-        tag_result = subprocess.run(
-            ["gh", "api", "repos/Swanand58/relic/releases/latest", "--jq", ".tag_name"],
+        pip_result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "relic-graph"],
             capture_output=True,
             text=True,
         )
-        tag = tag_result.stdout.strip() if tag_result.returncode == 0 and tag_result.stdout.strip() else None
+        if pip_result.returncode == 0:
+            console.print(style.success("relic updated from PyPI"))
+            return
 
-        if tag:
-            console.print(style.dim(f"   installing {tag}…\n"))
-            ref = tag
-        else:
-            console.print(style.dim("   no release found, falling back to main…\n"))
-            ref = "main"
-
-        result = subprocess.run(
-            [
-                "uv",
-                "tool",
-                "install",
-                "--reinstall",
-                f"git+https://github.com/Swanand58/relic@{ref}",
-            ],
+        console.print(style.dim("   pip upgrade failed, trying uv…\n"))
+        uv_result = subprocess.run(
+            ["uv", "tool", "install", "--upgrade", "relic-graph"],
             text=True,
         )
-        if result.returncode != 0:
-            console.print(style.error("update failed — is uv installed and on PATH?"))
-            raise SystemExit(result.returncode)
-        console.print(style.success(f"relic updated to {ref}"))
-        return
+        if uv_result.returncode == 0:
+            console.print(style.success("relic updated via uv"))
+            return
+
+        console.print(style.error("update failed — is pip or uv installed and on PATH?"))
+        raise SystemExit(1)
 
     if ctx.invoked_subcommand is not None:
         return

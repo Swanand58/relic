@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-05
+
+### Fixed
+
+- `relic --version` now reads version dynamically from package metadata instead of a hardcoded string.
+- `relic --update` uv fallback uses `uv tool upgrade` instead of invalid `uv tool install --upgrade`.
+
 ## [0.2.2] - 2026-05-05
 
 ### Fixed

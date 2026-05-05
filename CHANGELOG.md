@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-05
+
+### Changed
+
+- Package renamed to `relic-graph` for PyPI distribution.
+- `relic --update` now upgrades from PyPI instead of GitHub.
+- Dependency floors bumped: networkx >=3.6.1, mcp >=1.27.0, ruff >=0.15.12.
+
 ## [0.2.0] - 2026-05-04
 
 ### Added

@@ -26,7 +26,7 @@ jobs:
             pyproject.toml
             uv.lock
       - name: Install
-        run: uv sync --all-extras --group dev
+        run: uv sync --group dev
       - name: Ruff check
         run: uv run ruff check relic tests
       - name: Ruff format --check
@@ -49,7 +49,7 @@ jobs:
             pyproject.toml
             uv.lock
       - name: Install (${{ matrix.python-version }})
-        run: uv sync --all-extras --group dev --python ${{ matrix.python-version }}
+        run: uv sync --group dev --python ${{ matrix.python-version }}
       - name: Pytest
         run: uv run pytest
 
@@ -66,7 +66,7 @@ jobs:
             pyproject.toml
             uv.lock
       - name: Install
-        run: uv sync --all-extras
+        run: uv sync
       - name: Pin relic.yaml (dogfood on relic itself)
         run: |
           cat > relic.yaml <<'EOF'

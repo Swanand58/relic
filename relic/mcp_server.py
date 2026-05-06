@@ -300,9 +300,7 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     sections: list[str] = []
     for t in targets:
-        result = _query_single(
-            G, t, depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols
-        )
+        result = _query_single(G, t, depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols)
         sections.append(result[0].text)
     return [TextContent(type="text", text="\n\n---\n\n".join(sections))]
 

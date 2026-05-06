@@ -320,9 +320,7 @@ _TS_NAMED_IMPORT_RE = re.compile(
 _TS_CALL_RE = re.compile(r"""\b(\w+)\s*\(""")
 
 
-def _extract_ts_calls(
-    source: str, own_symbols: set[str], imported_symbols: set[str]
-) -> list[tuple[str, str]]:
+def _extract_ts_calls(source: str, own_symbols: set[str], imported_symbols: set[str]) -> list[tuple[str, str]]:
     """Extract call-like patterns from TS/JS source.
 
     Since we lack AST-level function body scoping, we scan the entire file

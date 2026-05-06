@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Swanand58/relic/actions/workflows/ci.yml/badge.svg)](https://github.com/Swanand58/relic/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/Swanand58/relic/blob/main/LICENSE)
 
 Relic solves the cold-read problem in AI coding agents.
 
@@ -174,7 +174,7 @@ Relic exposes five tools over MCP (stdio transport):
 | `relic_stats` | To verify the index is fresh before a large refactor |
 | `relic_diff` | After merges or big edits — shows what changed since last index without a full reindex |
 
-See [docs/MCP.md](docs/MCP.md) for full tool reference and agent setup.
+See [docs/MCP.md](https://github.com/Swanand58/relic/blob/main/docs/MCP.md) for full tool reference and agent setup.
 
 ---
 
@@ -360,17 +360,17 @@ Register once per project, all agents in the session get all four relic tools na
 
 **No external calls** — no API calls, no telemetry. Code never leaves your machine. The only network calls relic makes are during `relic --update`: one GitHub API call to find the latest release tag, then `uv tool install` to reinstall from that tag.
 
-For vulnerability reports see [SECURITY.md](SECURITY.md).
+For vulnerability reports see [SECURITY.md](https://github.com/Swanand58/relic/blob/main/SECURITY.md).
 
 ---
 
 ## Contributing
 
-PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions,
+PRs welcome. See [CONTRIBUTING.md](https://github.com/Swanand58/relic/blob/main/CONTRIBUTING.md) for setup, conventions,
 and what we will (and won't) accept.
 
 ---
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/Swanand58/relic/blob/main/LICENSE)

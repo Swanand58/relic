@@ -55,7 +55,7 @@ def compute_diff(
         config = yaml.safe_load(f) or {}
     subprojects = config.get("subprojects", {})
 
-    disk_files = _collect_source_files(project_root, subprojects)
+    disk_files, _ = _collect_source_files(project_root, subprojects)
     disk_rels = {_posix_rel(p, project_root) for p, _ in disk_files}
     graph_files = {n for n, d in G.nodes(data=True) if d.get("ntype") == "file"}
 

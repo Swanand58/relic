@@ -154,7 +154,7 @@ def run_watch(
 
     def _do_reindex() -> None:
         t0 = time.monotonic()
-        G = run_index(project_root, knowledge_dir, config_file)
+        G, _ = run_index(project_root, knowledge_dir, config_file)
         elapsed = time.monotonic() - t0
         files = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
         symbols = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")

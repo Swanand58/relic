@@ -37,7 +37,7 @@ def _symbol_fingerprint(source: str, rel_path: str, project_root: Path, lang: st
 def compute_diff(
     project_root: Path,
     knowledge_dir: Path,
-    config_path: Path,
+    config_path: Path | None = None,
 ) -> dict:
     """Compare on-disk source files against the indexed graph.
 
@@ -51,9 +51,11 @@ def compute_diff(
 
     G = load_graph(knowledge_dir)
 
-    with config_path.open() as f:
-        config = yaml.safe_load(f) or {}
-    subprojects = config.get("subprojects", {})
+    subprojects: dict = {}
+    if config_path and config_path.exists():
+        with config_path.open() as f:
+            config = yaml.safe_load(f) or {}
+        subprojects = config.get("subprojects", {})
 
     disk_files, _ = _collect_source_files(project_root, subprojects)
     disk_rels = {_posix_rel(p, project_root) for p, _ in disk_files}

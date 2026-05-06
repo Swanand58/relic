@@ -27,29 +27,60 @@ from relic.indexer import LANGUAGE_MAP, MAX_FILE_BYTES, SKIP_DIRS
 _EXAMPLE_LIMIT = 5
 
 
-def compute_coverage(project_root: Path, subprojects: dict) -> dict:
-    """Walk every subproject and classify each file.
+def _classify_tree(root: Path, project_root: Path) -> dict:
+    """Walk *root* and classify each file into indexed/skipped buckets."""
+    entry: dict = {
+        "missing": False,
+        "indexed": [],
+        "skipped": {"no_parser": [], "too_large": [], "symlink": []},
+    }
+    if not root.exists():
+        entry["missing"] = True
+        return entry
 
-    Returns a dict shaped:
+    for p in sorted(root.rglob("*")):
+        if any(part in SKIP_DIRS for part in p.parts):
+            continue
+
+        if p.is_symlink():
+            entry["skipped"]["symlink"].append(_safe_rel(p, project_root))
+            continue
+
+        if not p.is_file():
+            continue
+
+        rel = _safe_rel(p, project_root)
+
+        if p.suffix not in LANGUAGE_MAP:
+            entry["skipped"]["no_parser"].append(rel)
+            continue
+
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+
+        if size > MAX_FILE_BYTES:
+            entry["skipped"]["too_large"].append((rel, size))
+            continue
+
+        entry["indexed"].append(rel)
+
+    return entry
+
+
+def compute_coverage(project_root: Path, subprojects: dict | None = None) -> dict:
+    """Classify every file as indexed or skipped, with reasons.
+
+    When *subprojects* is provided (from relic.yaml), each subproject is
+    reported separately.  When ``None`` or empty (zero-config mode), the
+    entire project tree is walked as a single ``"(project)"`` entry.
+
+    Returns a dict shaped::
+
         {
-          "subprojects": {
-            <name>: {
-              "missing": bool,                    # subproject path doesn't exist
-              "indexed": list[str],               # relative paths
-              "skipped": {
-                "no_parser": list[str],
-                "too_large": list[tuple[str, int]],   # (path, size_bytes)
-                "symlink":   list[str],
-              }
-            },
-            ...
-          },
-          "totals": {
-            "indexed": int,
-            "no_parser": int,
-            "too_large": int,
-            "symlink": int,
-          }
+          "subprojects": { <name>: { "missing", "indexed", "skipped" }, ... },
+          "totals": { "indexed", "no_parser", "too_large", "symlink" },
         }
 
     Files inside SKIP_DIRS (.git, node_modules, build, etc) are not surfaced —
@@ -58,56 +89,22 @@ def compute_coverage(project_root: Path, subprojects: dict) -> dict:
     report: dict[str, dict] = {}
     totals = {"indexed": 0, "no_parser": 0, "too_large": 0, "symlink": 0}
 
-    for name, cfg in subprojects.items():
-        sub_path = (project_root / cfg["path"]).resolve()
-        entry: dict = {
-            "missing": False,
-            "indexed": [],
-            "skipped": {"no_parser": [], "too_large": [], "symlink": []},
-        }
-
-        if not sub_path.exists():
-            entry["missing"] = True
+    if subprojects:
+        for name, cfg in subprojects.items():
+            sub_path = (project_root / cfg["path"]).resolve()
+            entry = _classify_tree(sub_path, project_root)
             report[name] = entry
+    else:
+        entry = _classify_tree(project_root, project_root)
+        report["(project)"] = entry
+
+    for entry in report.values():
+        if entry["missing"]:
             continue
-
-        for p in sorted(sub_path.rglob("*")):
-            # Honour the same SKIP_DIRS exclusion as the indexer. We don't
-            # report on these because they're well-known opt-outs, not files
-            # the user might be surprised to see missing from the index.
-            if any(part in SKIP_DIRS for part in p.parts):
-                continue
-
-            if p.is_symlink():
-                rel = _safe_rel(p, project_root)
-                entry["skipped"]["symlink"].append(rel)
-                totals["symlink"] += 1
-                continue
-
-            if not p.is_file():
-                continue
-
-            rel = _safe_rel(p, project_root)
-
-            if p.suffix not in LANGUAGE_MAP:
-                entry["skipped"]["no_parser"].append(rel)
-                totals["no_parser"] += 1
-                continue
-
-            try:
-                size = p.stat().st_size
-            except OSError:
-                continue
-
-            if size > MAX_FILE_BYTES:
-                entry["skipped"]["too_large"].append((rel, size))
-                totals["too_large"] += 1
-                continue
-
-            entry["indexed"].append(rel)
-            totals["indexed"] += 1
-
-        report[name] = entry
+        totals["indexed"] += len(entry["indexed"])
+        totals["no_parser"] += len(entry["skipped"]["no_parser"])
+        totals["too_large"] += len(entry["skipped"]["too_large"])
+        totals["symlink"] += len(entry["skipped"]["symlink"])
 
     return {"subprojects": report, "totals": totals}
 

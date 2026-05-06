@@ -161,7 +161,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "subproject": {
                         "type": "string",
-                        "description": "Restrict to one subproject from relic.yaml.",
+                        "description": "Restrict to one subproject (if configured in relic.yaml).",
                     },
                     "limit": {
                         "type": "integer",

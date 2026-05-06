@@ -42,26 +42,18 @@ KNOWLEDGE_DIR = Path(".knowledge")
 PROJECT_ROOT = Path.cwd()
 
 
-def _load_config() -> dict:
-    """Read and parse relic.yaml from the current working directory.
-
-    Exits with an error message if the file is missing or malformed.
-    """
+def _load_subprojects() -> dict | None:
+    """Return subprojects dict from relic.yaml, or None if the file is absent."""
     if not CONFIG_FILE.exists():
-        console.print(style.error(f"{CONFIG_FILE} not found. Create one in the project root to use relic."))
-        raise SystemExit(1)
+        return None
     try:
         with CONFIG_FILE.open(encoding="utf-8") as fh:
             cfg = yaml.safe_load(fh)
-    except yaml.YAMLError as exc:
-        console.print(style.error(f"failed to parse {CONFIG_FILE}: {exc}"))
-        raise SystemExit(1)
-
+    except yaml.YAMLError:
+        return None
     if not cfg or "subprojects" not in cfg:
-        console.print(style.error(f"{CONFIG_FILE} must contain a 'subprojects' key."))
-        raise SystemExit(1)
-
-    return cfg
+        return None
+    return cfg["subprojects"]
 
 
 def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
@@ -317,18 +309,16 @@ def watch_cmd(
     OS-native filesystem events (FSEvents/inotify/ReadDirectoryChangesW),
     not polling. Press Ctrl+C to stop.
     """
-    if not CONFIG_FILE.exists():
-        console.print(style.error(f"{CONFIG_FILE} not found. run `relic init` first."))
-        raise SystemExit(1)
     if not (KNOWLEDGE_DIR / "index.pkl").exists():
         console.print(style.error("no index found. run `relic index` once before `relic watch`."))
         raise SystemExit(1)
 
+    config = CONFIG_FILE if CONFIG_FILE.exists() else None
     try:
         run_watch(
             PROJECT_ROOT,
             KNOWLEDGE_DIR,
-            CONFIG_FILE,
+            config,
             debounce_seconds=max(0.05, debounce_ms / 1000),
         )
     except (FileNotFoundError, ValueError) as exc:
@@ -346,8 +336,8 @@ def coverage_cmd(
     parsers, or symlink rules look like model errors instead of tool limits.
     Use it after `relic index` (or `relic watch`) to audit coverage.
     """
-    cfg = _load_config()
-    coverage = compute_coverage(PROJECT_ROOT, cfg["subprojects"])
+    subprojects = _load_subprojects()
+    coverage = compute_coverage(PROJECT_ROOT, subprojects)
     render_coverage(coverage, console, verbose=verbose)
 
 
@@ -403,7 +393,8 @@ def diff_cmd() -> None:
         err_console.print(style.error("no index found — run `relic index` first"))
         raise SystemExit(1)
 
-    result = compute_diff(PROJECT_ROOT, KNOWLEDGE_DIR, CONFIG_FILE)
+    config = CONFIG_FILE if CONFIG_FILE.exists() else None
+    result = compute_diff(PROJECT_ROOT, KNOWLEDGE_DIR, config)
     if not result["stale"]:
         console.print(style.success("index is up-to-date — no changes detected"))
         return
@@ -470,15 +461,17 @@ def main(
     if ctx.invoked_subcommand is not None:
         return
 
-    cfg = _load_config()
-    all_subprojects: dict = cfg["subprojects"]
-
     if list_all:
+        subs = _load_subprojects()
+        if not subs:
+            console.print(style.dim("   no relic.yaml found — subproject labels not configured"))
+            console.print(style.dim("   relic works without it; create one only if you need per-subproject filtering"))
+            return
         table = style.make_table(title="subprojects")
         table.add_column("name", style=f"bold {style.SECONDARY}")
         table.add_column("path")
         table.add_column("description", style=style.DIM)
-        for name, info in all_subprojects.items():
+        for name, info in subs.items():
             table.add_row(name, info.get("path", ""), info.get("description", ""))
         console.print(table)
         return

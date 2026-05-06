@@ -142,7 +142,7 @@ class DebouncedReindex(FileSystemEventHandler):
 def run_watch(
     project_root: Path,
     knowledge_dir: Path,
-    config_file: Path,
+    config_file: Path | None = None,
     *,
     debounce_seconds: float = DEBOUNCE_SECONDS,
 ) -> None:

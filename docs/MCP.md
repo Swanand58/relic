@@ -1,7 +1,7 @@
 # Relic MCP Server
 
 Relic exposes a Model Context Protocol (MCP) server over stdio. Any MCP-compatible
-agent can call the four relic tools natively — no shell commands, no prompting required.
+agent can call the five relic tools natively — no shell commands, no prompting required.
 
 ```bash
 relic mcp    # start the server (stdio transport)
@@ -85,10 +85,12 @@ Get dependency context for a file or symbol before editing it.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `target` | string | yes | — | File path (`src/payments/processor.py`) or symbol name (`PaymentProcessor`) |
+| `target` | string | yes | — | File path, symbol name, `Class.method`, or space-separated batch |
 | `depth` | integer | no | `2` | BFS hops from target node. Use `1` for barrel/index files. |
+| `exclude_tests` | boolean | no | `true` | Filter test-file symbols from `neighbor_symbols` |
+| `max_neighbor_symbols` | integer | no | `30` | Cap neighbor symbols (0 = unlimited), ranked by connectivity |
 
-**Output:** TOON block — focus file, neighboring files, exported symbols, import edges, caller edges.
+**Output:** TOON block — focus file, neighboring files, exported symbols, import/caller/calls edges.
 
 ```
 focus: src/payments/processor.py
@@ -98,11 +100,11 @@ neighbors[3]{path,language,subproject}:
   src/payments/exceptions.py,python,payments
   src/core/database.py,python,core
 
-exports[4]{name,type,line}:
-  PaymentProcessor,class,12
-  process_payment,function,45
-  validate_card,function,78
-  RETRY_LIMIT,variable,8
+exports[4]{name,type,line,signature}:
+  PaymentProcessor,class,12,PaymentProcessor
+  process_payment,function,45,process_payment(order: Order) -> Receipt
+  validate_card,function,78,validate_card(card: Card) -> bool
+  RETRY_LIMIT,variable,8,RETRY_LIMIT
 
 neighbor_symbols[6]{name,type,file}:
   Payment,class,src/payments/models.py
@@ -117,6 +119,13 @@ imports[3]{from,to}:
 imported_by[2]{from,to}:
   src/api/views.py,src/payments/processor.py
   src/workers/billing.py,src/payments/processor.py
+
+calls[2]{caller,callee}:
+  process_payment,validate_card
+  process_payment,DatabaseSession
+
+called_by[1]{caller,callee}:
+  handle_checkout,process_payment
 ```
 
 **Depth guidance:**
@@ -213,6 +222,39 @@ subprojects: core, payments, workers
 
 ---
 
+### `relic_diff`
+
+Check what changed since the last index without a full reindex.
+
+**When to call:** after merges or big edits to decide whether `relic_reindex` is needed.
+
+**Parameters:** none.
+
+**Output:**
+
+```
+diff_summary:
+  new_files: 2
+  deleted_files: 0
+  changed_files: 3
+
+new_files[2]{path}:
+  src/payments/refunds.py
+  src/payments/disputes.py
+
+changed_symbols[4]{file,name,status}:
+  src/payments/processor.py,process_refund,added
+  src/payments/processor.py,validate_card,changed
+  src/core/database.py,execute_query,changed
+  src/core/database.py,close_pool,added
+```
+
+**Notes:**
+- Lightweight — compares on-disk source against the stored graph without rebuilding
+- If the diff shows changes, follow up with `relic_reindex` to update the graph
+
+---
+
 ## Reading TOON output
 
 TOON (Token-Oriented Object Notation) is a tabular format. Column names are declared
@@ -233,9 +275,12 @@ tableName[rowCount]{col1,col2,col3}:
 | `imports` | `from → to` | focus file imports from these files |
 | `imported_by` | `from → to` | these files import the focus file (callers) |
 | `extends` | `child → parent` | inheritance relationships |
+| `calls` | `caller → callee` | outbound function calls from focus symbols |
+| `called_by` | `caller → callee` | inbound function calls into focus symbols |
 
 **`imported_by` is the most important table** — it tells you what breaks if you change
-this file. Agents miss this entirely with manual reads.
+this file. `calls` and `called_by` go deeper — showing which *functions* call which,
+so you don't need to read the caller file to understand the dependency.
 
 ---
 
@@ -282,8 +327,8 @@ Node not in index. Either the file was added after the last index, or the path i
 Use `relic_search` to find the correct path, or call `relic_reindex` to rebuild.
 
 **`relic_reindex` fails with `FileNotFoundError`**
-`relic.yaml` not found. Run `relic init` in the project root first.
+No index found. Run `relic init` in the project root first.
 
 **Index is stale after editing files**
 Call `relic_reindex` after any file write/delete to keep the graph accurate.
-For passive refresh, watch mode is on the roadmap.
+Or run `relic watch` in a terminal tab for automatic rebuilds on file changes.

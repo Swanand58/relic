@@ -340,10 +340,9 @@ def _handle_search(args: dict) -> list[TextContent]:
 async def _handle_reindex() -> list[TextContent]:
     try:
         t0 = time.monotonic()
-        G = await asyncio.to_thread(run_index, Path("."), KNOWLEDGE_DIR, CONFIG_FILE)
+        config = CONFIG_FILE if CONFIG_FILE.exists() else None
+        G = await asyncio.to_thread(run_index, Path("."), KNOWLEDGE_DIR, config)
         elapsed = time.monotonic() - t0
-    except FileNotFoundError as exc:
-        return [TextContent(type="text", text=f"Error: {exc}. Run `relic init` in the project root first.")]
     except Exception as exc:
         return [TextContent(type="text", text=f"Reindex failed: {exc}")]
 

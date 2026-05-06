@@ -1,7 +1,7 @@
 """Indexer — static analysis engine that builds a NetworkX knowledge graph.
 
 No LLM involved. Extracts:
-- File nodes with language and subproject metadata
+- File nodes with language metadata
 - Symbol nodes (classes, functions, interfaces, types) with signatures
 - Import edges between files
 - Define edges from files to their symbols
@@ -24,7 +24,7 @@ Node attributes:
     --- file nodes ---
     path     : relative path (same as node ID)
     language : "python" | "typescript" | "javascript" | "other"
-    subproject: subproject name from relic.yaml (or "" if unknown)
+    subproject: subproject name from relic.yaml (or "" if unlabeled)
     --- symbol nodes ---
     name     : symbol name
     stype    : "class" | "function" | "interface" | "type" | "variable"
@@ -33,12 +33,12 @@ Node attributes:
     signature: parameter/return-type signature (empty string if unavailable)
 
 Edge types:
-    imports   : file  → file    (file A imports from file B)
-    defines   : file  → symbol  (file A defines symbol S)
-    extends   : symbol → symbol (class A extends class B)
-    uses      : file  → symbol  (file A references symbol S from another file)
-    tested_by : file  → file    (source file → its test file)
-    tests     : file  → file    (test file → the source it tests)
+    imports   : file   → file    (file A imports from file B)
+    defines   : file   → symbol  (file A defines symbol S)
+    extends   : symbol → symbol  (class A extends class B)
+    uses      : file   → symbol  (file A references symbol S from another file)
+    tested_by : file   → file    (source file → its test file)
+    tests     : file   → file    (test file → the source it tests)
 """
 
 import ast
@@ -387,44 +387,48 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
 _TEST_DIRS = {"tests", "test", "__tests__", "spec"}
 
 
-def _collect_source_files(project_root: Path, subprojects: dict) -> list[tuple[Path, str]]:
-    """Return list of (absolute_path, subproject_name) for all indexable files.
+def _collect_source_files(project_root: Path, subprojects: dict | None = None) -> list[tuple[Path, str]]:
+    """Walk entire project tree and return (absolute_path, subproject_label) pairs.
 
-    Walks each subproject path declared in relic.yaml, plus any top-level
-    test directories (tests/, test/, __tests__/, spec/) so that test files
-    are searchable and can participate in tested_by edges.
+    Every source file with a recognised extension is collected.  If *subprojects*
+    is provided (from relic.yaml), files under a subproject path are tagged with
+    its name; all other files are tagged ``""``.
     """
-    results = []
+    subprojects = subprojects or {}
+
+    # Pre-resolve subproject paths for matching
+    sp_resolved: list[tuple[str, Path]] = []
+    for name, cfg in subprojects.items():
+        sp_resolved.append((name, (project_root / cfg["path"]).resolve()))
+
+    results: list[tuple[Path, str]] = []
     seen: set[str] = set()
 
-    def _walk(root: Path, sp_name: str) -> None:
-        if not root.exists():
-            return
-        for p in sorted(root.rglob("*")):
-            if p.is_symlink() or not p.is_file():
-                continue
-            if any(part in SKIP_DIRS for part in p.parts):
-                continue
-            if p.suffix not in LANGUAGE_MAP and p.suffix not in {".py"}:
-                continue
-            if p.stat().st_size > MAX_FILE_BYTES:
-                continue
-            key = str(p.resolve())
-            if key not in seen:
-                seen.add(key)
-                results.append((p, sp_name))
+    for p in sorted(project_root.rglob("*")):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in p.relative_to(project_root).parts):
+            continue
+        if p.suffix not in LANGUAGE_MAP:
+            continue
+        if p.stat().st_size > MAX_FILE_BYTES:
+            continue
+        key = str(p.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
 
-    for name, cfg in subprojects.items():
-        sub_path = (project_root / cfg["path"]).resolve()
-        _walk(sub_path, name)
-
-    # Auto-discover top-level test directories
-    for test_dir_name in _TEST_DIRS:
-        test_dir = (project_root / test_dir_name).resolve()
-        if test_dir.exists() and test_dir.is_dir():
-            already_covered = any(test_dir == (project_root / cfg["path"]).resolve() for cfg in subprojects.values())
-            if not already_covered:
-                _walk(test_dir, "")
+        # Tag with subproject label if the file falls under a declared path
+        label = ""
+        resolved_p = p.resolve()
+        for sp_name, sp_path in sp_resolved:
+            try:
+                resolved_p.relative_to(sp_path)
+                label = sp_name
+                break
+            except ValueError:
+                continue
+        results.append((p, label))
 
     return results
 
@@ -531,10 +535,11 @@ def _add_test_mapping(G: nx.DiGraph) -> None:
                     break
 
 
-def build_graph(project_root: Path, subprojects: dict) -> nx.DiGraph:
+def build_graph(project_root: Path, subprojects: dict | None = None) -> nx.DiGraph:
     """Build and return the full knowledge graph as a NetworkX DiGraph.
 
-    Runs static analysis on all source files in all subprojects.
+    Walks the entire project tree and runs static analysis on all source files.
+    If *subprojects* is provided, files are tagged with their subproject name.
     """
     G = nx.DiGraph()
 
@@ -694,17 +699,17 @@ def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
     }
 
 
-def run_index(project_root: Path, knowledge_dir: Path, config_file: Path) -> nx.DiGraph:
-    """Load relic.yaml, build graph, save to knowledge_dir. Returns the graph."""
-    if not config_file.exists():
-        raise FileNotFoundError(f"{config_file} not found. Run `relic init` first.")
+def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None = None) -> nx.DiGraph:
+    """Build graph, save to knowledge_dir.  Returns the graph.
 
-    with config_file.open(encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-
-    subprojects = cfg.get("subprojects", {})
-    if not subprojects:
-        raise ValueError("No subprojects defined in relic.yaml.")
+    If *config_file* points to an existing relic.yaml, subproject labels are
+    read from it.  Otherwise the full project tree is indexed without labels.
+    """
+    subprojects: dict = {}
+    if config_file and config_file.exists():
+        with config_file.open(encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        subprojects = cfg.get("subprojects", {})
 
     G = build_graph(project_root, subprojects)
     save_graph(G, knowledge_dir)

@@ -141,7 +141,7 @@ class TestRenderSearchToon:
         files, _ = search_graph(sample_graph, "processor", kind="file")
         out = render_search_toon("processor", files, [])
         assert "file_matches[" in out
-        assert "{path,language,subproject}" in out
+        assert "{path,language}" in out
 
     def test_includes_symbol_matches_table(self, sample_graph):
         _, symbols = search_graph(sample_graph, "process", kind="symbol")

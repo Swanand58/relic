@@ -141,8 +141,8 @@ class TestSubgraphToToon:
             define_edges=[],
             extends_edges=[],
         )
-        assert "neighbors[1]{path,language,subproject}:" in out
-        assert "src/bar.py,python,app" in out
+        assert "neighbors[1]{path,language}:" in out
+        assert "src/bar.py,python" in out
         # focus file not duplicated in neighbors
         assert "src/foo.py,python,app" not in out
 

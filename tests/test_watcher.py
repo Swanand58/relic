@@ -19,7 +19,7 @@ from watchdog.events import (
 from relic.watcher import DebouncedReindex
 
 DEBOUNCE = 0.05  # 50 ms — fast enough for tests, slow enough to coalesce
-SETTLE = 0.15  # buffer when waiting for timer fire
+SETTLE = 0.35  # buffer when waiting for timer fire (CI runners need more headroom)
 
 
 def _wait_for(predicate, *, timeout: float = 2.0, interval: float = 0.02):

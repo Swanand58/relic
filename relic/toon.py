@@ -199,9 +199,7 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
     w = ToonWriter()
     w.comment("Relic knowledge graph — full index").blank()
 
-    file_rows = [
-        [d["path"], d["language"]] for _, d in sorted(G.nodes(data=True)) if d.get("ntype") == "file"
-    ]
+    file_rows = [[d["path"], d["language"]] for _, d in sorted(G.nodes(data=True)) if d.get("ntype") == "file"]
     if file_rows:
         w.table("files", ["path", "language"], file_rows).blank()
 

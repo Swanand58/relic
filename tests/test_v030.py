@@ -23,9 +23,7 @@ class TestZeroConfigIndexing:
         src = tmp_path / "src"
         src.mkdir()
         (src / "app.py").write_text("def main():\n    pass\n")
-        (tmp_path / "relic.yaml").write_text(
-            "subprojects:\n  app:\n    path: ./src\n    description: app\n"
-        )
+        (tmp_path / "relic.yaml").write_text("subprojects:\n  app:\n    path: ./src\n    description: app\n")
         G = run_index(tmp_path, tmp_path / ".knowledge", tmp_path / "relic.yaml")
         file_nodes = {n: d for n, d in G.nodes(data=True) if d.get("ntype") == "file"}
         assert "src/app.py" in file_nodes

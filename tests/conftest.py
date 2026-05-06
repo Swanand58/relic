@@ -111,6 +111,6 @@ def tmp_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
     from relic.indexer import run_index
 
-    run_index(tmp_path, tmp_path / ".knowledge", tmp_path / "relic.yaml")
+    run_index(tmp_path, tmp_path / ".knowledge", tmp_path / "relic.yaml")  # returns (G, skip_stats)
 
     return tmp_path

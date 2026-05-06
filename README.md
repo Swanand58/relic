@@ -120,13 +120,21 @@ relic init
 
 Scans the entire project tree, builds the knowledge graph via static analysis (no LLM), and adds `.knowledge/` to `.gitignore`. No config file required — every source file with a recognized extension is indexed automatically.
 
-To rebuild manually after significant changes:
+To rebuild after changes:
 
 ```bash
 relic index
 ```
 
-Or use `relic_reindex` from inside the agent session. To keep the index fresh automatically while you work, run `relic watch` in a separate terminal tab.
+Shows a delta (what changed since last index), which directories were skipped, and how many files were excluded by `.relicignore`. Or use `relic_reindex` from inside the agent session, or `relic watch` in a separate terminal tab to auto-rebuild on file changes.
+
+**Optional:** To exclude files from indexing, create a `.relicignore` in your project root (same syntax as `.gitignore`):
+
+```
+generated/
+*.pb.py
+vendor/**
+```
 
 **Optional:** If you want subproject labels (for filtering search results), create a `relic.yaml` manually:
 
@@ -252,7 +260,7 @@ For a single target file, prints what an agent would read manually (target file 
 
 ```bash
 relic init                         # scan project, build knowledge graph (no LLM)
-relic index                        # rebuild knowledge graph from source
+relic index                        # rebuild graph, show delta + skip stats
 relic query <file|symbol>          # print TOON context subgraph to stdout
 relic query Class.method           # symbol-scoped query via dotted notation
 relic query "fileA fileB"          # batch query — merged TOON output

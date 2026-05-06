@@ -341,7 +341,7 @@ async def _handle_reindex() -> list[TextContent]:
     try:
         t0 = time.monotonic()
         config = CONFIG_FILE if CONFIG_FILE.exists() else None
-        G = await asyncio.to_thread(run_index, Path("."), KNOWLEDGE_DIR, config)
+        G, _ = await asyncio.to_thread(run_index, Path("."), KNOWLEDGE_DIR, config)
         elapsed = time.monotonic() - t0
     except Exception as exc:
         return [TextContent(type="text", text=f"Reindex failed: {exc}")]

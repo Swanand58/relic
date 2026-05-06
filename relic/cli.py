@@ -109,7 +109,7 @@ def project_init() -> None:
     config = CONFIG_FILE if CONFIG_FILE.exists() else None
     with style.make_spinner("indexing codebase…") as spinner:
         spinner.add_task("", total=None)
-        G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
+        G, _skip = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
 
     file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
@@ -119,6 +119,9 @@ def project_init() -> None:
     console.print(style.kv("symbols", symbol_count))
     console.print(style.kv("edges", edge_count))
     console.print()
+
+    toon_path = KNOWLEDGE_DIR / "index.toon"
+    toon_path.write_text(full_index_to_toon(G), encoding="utf-8")
 
     _add_to_gitignore(PROJECT_ROOT, [".knowledge/"])
 
@@ -134,18 +137,24 @@ def project_init() -> None:
 
 @app.command(name="index")
 def index_cmd() -> None:
-    """Build the knowledge graph by statically analysing all subproject source files.
-
-    No LLM involved. Writes .knowledge/index.pkl (NetworkX graph).
-    Run this after relic init, and again whenever the codebase changes significantly.
-    """
+    """Rebuild the knowledge graph. Shows what changed, what's skipped, and respects .relicignore."""
     console.print(style.header("index"))
     console.print()
+
+    # Load previous index for delta comparison
+    prev_files = prev_symbols = prev_edges = 0
+    try:
+        prev_G = load_graph(KNOWLEDGE_DIR)
+        prev_files = sum(1 for _, d in prev_G.nodes(data=True) if d.get("ntype") == "file")
+        prev_symbols = sum(1 for _, d in prev_G.nodes(data=True) if d.get("ntype") == "symbol")
+        prev_edges = prev_G.number_of_edges()
+    except FileNotFoundError:
+        pass
 
     config = CONFIG_FILE if CONFIG_FILE.exists() else None
     with style.make_spinner("indexing codebase…") as spinner:
         spinner.add_task("", total=None)
-        G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
+        G, skip_stats = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
 
     file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
@@ -154,6 +163,33 @@ def index_cmd() -> None:
     console.print(style.kv("files", file_count))
     console.print(style.kv("symbols", symbol_count))
     console.print(style.kv("edges", edge_count))
+
+    # Delta
+    if prev_files or prev_symbols or prev_edges:
+        df = file_count - prev_files
+        ds = symbol_count - prev_symbols
+        de = edge_count - prev_edges
+        parts = []
+        if df:
+            parts.append(f"{df:+d} files")
+        if ds:
+            parts.append(f"{ds:+d} symbols")
+        if de:
+            parts.append(f"{de:+d} edges")
+        if parts:
+            console.print(style.kv("delta", ", ".join(parts)))
+        else:
+            console.print(style.kv("delta", "no changes"))
+
+    # Skip info
+    skipped_dirs = skip_stats.get("skipped_dirs", set())
+    ignored_count = skip_stats.get("ignored_count", 0)
+    if skipped_dirs:
+        dirs_str = ", ".join(sorted(f"{d}/" for d in skipped_dirs))
+        console.print(style.kv("skipped", dirs_str))
+    if ignored_count:
+        console.print(style.kv("ignored", f"{ignored_count} files via .relicignore"))
+
     console.print()
 
     toon_path = KNOWLEDGE_DIR / "index.toon"

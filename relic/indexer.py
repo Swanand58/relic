@@ -387,12 +387,41 @@ def _resolve_ts_import(spec: str, file_dir: Path, project_root: Path) -> str | N
 _TEST_DIRS = {"tests", "test", "__tests__", "spec"}
 
 
-def _collect_source_files(project_root: Path, subprojects: dict | None = None) -> list[tuple[Path, str]]:
-    """Walk entire project tree and return (absolute_path, subproject_label) pairs.
+def _load_relicignore(project_root: Path) -> list[str]:
+    """Load glob patterns from .relicignore (if it exists).
 
-    Every source file with a recognised extension is collected.  If *subprojects*
-    is provided (from relic.yaml), files under a subproject path are tagged with
-    its name; all other files are tagged ``""``.
+    Blank lines and lines starting with ``#`` are ignored.
+    """
+    ignore_file = project_root / ".relicignore"
+    if not ignore_file.exists():
+        return []
+    patterns: list[str] = []
+    for line in ignore_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            patterns.append(stripped)
+    return patterns
+
+
+def _matches_ignore(rel_posix: str, patterns: list[str]) -> bool:
+    """Return True if a POSIX relative path matches any .relicignore pattern."""
+    p = PurePosixPath(rel_posix)
+    for pattern in patterns:
+        if p.match(pattern):
+            return True
+        # Also match directory-style patterns like "generated/"
+        if pattern.endswith("/") and rel_posix.startswith(pattern.rstrip("/")):
+            return True
+    return False
+
+
+def _collect_source_files(project_root: Path, subprojects: dict | None = None) -> tuple[list[tuple[Path, str]], dict]:
+    """Walk entire project tree and return collected files plus skip statistics.
+
+    Returns:
+        files      — list of (absolute_path, subproject_label) pairs
+        skip_stats — dict with keys: skipped_dirs (set of dir names found),
+                     ignored_count (files matched by .relicignore)
     """
     subprojects = subprojects or {}
 
@@ -401,18 +430,33 @@ def _collect_source_files(project_root: Path, subprojects: dict | None = None) -
     for name, cfg in subprojects.items():
         sp_resolved.append((name, (project_root / cfg["path"]).resolve()))
 
+    ignore_patterns = _load_relicignore(project_root)
+
     results: list[tuple[Path, str]] = []
     seen: set[str] = set()
+    skipped_dirs: set[str] = set()
+    ignored_count = 0
 
     for p in sorted(project_root.rglob("*")):
         if p.is_symlink() or not p.is_file():
             continue
-        if any(part in SKIP_DIRS for part in p.relative_to(project_root).parts):
+
+        rel_parts = p.relative_to(project_root).parts
+        hit = SKIP_DIRS.intersection(rel_parts)
+        if hit:
+            skipped_dirs.update(hit)
             continue
+
         if p.suffix not in LANGUAGE_MAP:
             continue
         if p.stat().st_size > MAX_FILE_BYTES:
             continue
+
+        rel_posix = _posix_rel(p, project_root)
+        if ignore_patterns and _matches_ignore(rel_posix, ignore_patterns):
+            ignored_count += 1
+            continue
+
         key = str(p.resolve())
         if key in seen:
             continue
@@ -430,7 +474,11 @@ def _collect_source_files(project_root: Path, subprojects: dict | None = None) -
                 continue
         results.append((p, label))
 
-    return results
+    skip_stats = {
+        "skipped_dirs": skipped_dirs,
+        "ignored_count": ignored_count,
+    }
+    return results, skip_stats
 
 
 _TEST_PREFIXES = ("test_", "tests_")
@@ -535,15 +583,15 @@ def _add_test_mapping(G: nx.DiGraph) -> None:
                     break
 
 
-def build_graph(project_root: Path, subprojects: dict | None = None) -> nx.DiGraph:
-    """Build and return the full knowledge graph as a NetworkX DiGraph.
+def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx.DiGraph, dict]:
+    """Build and return the full knowledge graph plus skip statistics.
 
     Walks the entire project tree and runs static analysis on all source files.
     If *subprojects* is provided, files are tagged with their subproject name.
     """
     G = nx.DiGraph()
 
-    files = _collect_source_files(project_root, subprojects)
+    files, skip_stats = _collect_source_files(project_root, subprojects)
 
     # First pass — add all file nodes
     for abs_path, subproject in files:
@@ -619,7 +667,7 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> nx.DiGra
     # Fourth pass — test file mapping by naming convention
     _add_test_mapping(G)
 
-    return G
+    return G, skip_stats
 
 
 # ---------------------------------------------------------------------------
@@ -699,8 +747,8 @@ def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
     }
 
 
-def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None = None) -> nx.DiGraph:
-    """Build graph, save to knowledge_dir.  Returns the graph.
+def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None = None) -> tuple[nx.DiGraph, dict]:
+    """Build graph, save to knowledge_dir.  Returns (graph, skip_stats).
 
     If *config_file* points to an existing relic.yaml, subproject labels are
     read from it.  Otherwise the full project tree is indexed without labels.
@@ -711,6 +759,6 @@ def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None 
             cfg = yaml.safe_load(f) or {}
         subprojects = cfg.get("subprojects", {})
 
-    G = build_graph(project_root, subprojects)
+    G, skip_stats = build_graph(project_root, subprojects)
     save_graph(G, knowledge_dir)
-    return G
+    return G, skip_stats

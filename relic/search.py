@@ -163,8 +163,8 @@ def render_search_toon(
     if file_matches:
         w.table(
             "file_matches",
-            ["path", "language", "subproject"],
-            [[d.get("path", ""), d.get("language", ""), d.get("subproject", "")] for d in file_matches],
+            ["path", "language"],
+            [[d.get("path", ""), d.get("language", "")] for d in file_matches],
         ).blank()
 
     if symbol_matches:

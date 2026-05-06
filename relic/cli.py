@@ -19,7 +19,6 @@ from relic.audit import compute_audit, render_audit
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
 from relic.diff import compute_diff, diff_to_toon
-from relic.discovery import discover_subprojects
 from relic.indexer import compute_stats, load_graph, run_index
 from relic.mcp_server import run as run_mcp
 from relic.search import (
@@ -79,45 +78,58 @@ def _add_to_gitignore(project_root: Path, entries: list[str]) -> None:
 
 @app.command(name="init")
 def project_init() -> None:
-    """Auto-discover subprojects and generate relic.yaml. Adds relic entries to .gitignore."""
-    if CONFIG_FILE.exists():
-        console.print(style.warn(f"{CONFIG_FILE} already exists — delete it first to re-initialise."))
-        raise SystemExit(1)
+    """Scan the project, build the knowledge graph, and get ready to go."""
+    from collections import Counter
+
+    from relic.indexer import LANGUAGE_MAP, MAX_FILE_BYTES, SKIP_DIRS
 
     console.print(style.header("init"))
     console.print()
 
-    with style.make_spinner("discovering subprojects…") as spinner:
-        spinner.add_task("", total=None)
-        subprojects = discover_subprojects(PROJECT_ROOT)
+    # Scan — count source files by language
+    lang_counts: Counter[str] = Counter()
+    for p in sorted(PROJECT_ROOT.rglob("*")):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in p.relative_to(PROJECT_ROOT).parts):
+            continue
+        if p.suffix in LANGUAGE_MAP and p.stat().st_size <= MAX_FILE_BYTES:
+            lang_counts[LANGUAGE_MAP[p.suffix]] += 1
 
-    if not subprojects:
-        console.print(style.error("no subprojects found. Create relic.yaml manually and define your subprojects."))
+    total = sum(lang_counts.values())
+    if total == 0:
+        console.print(style.error("no source files found in this directory."))
         raise SystemExit(1)
 
-    config = {"subprojects": subprojects}
-    with CONFIG_FILE.open("w", encoding="utf-8") as f:
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-
-    table = style.make_table()
-    table.add_column("name", style=f"bold {style.SECONDARY}")
-    table.add_column("path")
-    table.add_column("description", style=style.DIM)
-    for name, info in subprojects.items():
-        table.add_row(name, info["path"], info["description"])
-    console.print(table)
-
-    _add_to_gitignore(PROJECT_ROOT, ["relic.yaml", ".knowledge/"])
-
+    parts = [f"{count} {lang}" for lang, count in lang_counts.most_common()]
+    console.print(style.dim(f"   found {total} files ({', '.join(parts)})"))
     console.print()
-    console.print(style.success(f"[bold]{CONFIG_FILE}[/] created with {len(subprojects)} subproject(s)"))
-    console.print(style.dim("   relic.yaml and .knowledge/ are personal — gitignored."))
+
+    # Index
+    config = CONFIG_FILE if CONFIG_FILE.exists() else None
+    with style.make_spinner("indexing codebase…") as spinner:
+        spinner.add_task("", total=None)
+        G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
+
+    file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
+    symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
+    edge_count = G.number_of_edges()
+
+    console.print(style.kv("files", file_count))
+    console.print(style.kv("symbols", symbol_count))
+    console.print(style.kv("edges", edge_count))
+    console.print()
+
+    _add_to_gitignore(PROJECT_ROOT, [".knowledge/"])
+
+    console.print(style.success("knowledge graph built"))
     console.print()
     console.print(style.dim("next:"))
     arrow = style.ARROW
     sec = style.SECONDARY
+    console.print(f"   {arrow}  [bold {sec}]relic --init cursor[/]   set up Cursor")
     console.print(f"   {arrow}  [bold {sec}]relic --init claude[/]   set up Claude Code")
-    console.print(f"   {arrow}  [bold {sec}]relic index[/]            build the knowledge graph")
+    console.print(f"   {arrow}  [bold {sec}]relic query <file>[/]    query the graph")
 
 
 @app.command(name="index")
@@ -130,13 +142,10 @@ def index_cmd() -> None:
     console.print(style.header("index"))
     console.print()
 
-    try:
-        with style.make_spinner("indexing codebase…") as spinner:
-            spinner.add_task("", total=None)
-            G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, CONFIG_FILE)
-    except (FileNotFoundError, ValueError) as exc:
-        console.print(style.error(str(exc)))
-        raise SystemExit(1)
+    config = CONFIG_FILE if CONFIG_FILE.exists() else None
+    with style.make_spinner("indexing codebase…") as spinner:
+        spinner.add_task("", total=None)
+        G = run_index(PROJECT_ROOT, KNOWLEDGE_DIR, config)
 
     file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")

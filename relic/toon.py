@@ -107,8 +107,8 @@ def subgraph_to_toon(
     if neighbor_files:
         w.table(
             "neighbors",
-            ["path", "language", "subproject"],
-            [[f["path"], f["language"], f["subproject"]] for f in neighbor_files],
+            ["path", "language"],
+            [[f["path"], f["language"]] for f in neighbor_files],
         ).blank()
 
     focus_symbols = [s for s in symbol_nodes if s["path"] == focus_path]
@@ -200,10 +200,10 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
     w.comment("Relic knowledge graph — full index").blank()
 
     file_rows = [
-        [d["path"], d["language"], d["subproject"]] for _, d in sorted(G.nodes(data=True)) if d.get("ntype") == "file"
+        [d["path"], d["language"]] for _, d in sorted(G.nodes(data=True)) if d.get("ntype") == "file"
     ]
     if file_rows:
-        w.table("files", ["path", "language", "subproject"], file_rows).blank()
+        w.table("files", ["path", "language"], file_rows).blank()
 
     sym_rows = [
         [d["name"], d["stype"], d["path"], d["line"], d.get("signature", "")]

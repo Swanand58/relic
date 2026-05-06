@@ -25,8 +25,7 @@ Relic also measures its own cost. `relic audit` shows exactly what relic adds to
 ## How it works
 
 ```
-relic init              # auto-detect subprojects → relic.yaml
-relic index             # static analysis → .knowledge/index.pkl  (seconds, no LLM)
+relic init              # scan project, build knowledge graph (seconds, no LLM)
 relic --init claude     # write CLAUDE.md + register MCP server in .claude/settings.json
 ```
 
@@ -35,10 +34,10 @@ Agent calls `relic_query` before touching unfamiliar code:
 ```
 focus: src/core/PageExtension.ts
 
-neighbors[9]{path,language,subproject}:
-  src/types.ts,typescript,src
-  src/layout/presets.ts,typescript,src
-  src/pagination/PaginationPlugin.ts,typescript,src
+neighbors[9]{path,language}:
+  src/types.ts,typescript
+  src/layout/presets.ts,typescript
+  src/pagination/PaginationPlugin.ts,typescript
   ...
 
 exports[8]{name,type,line,signature}:
@@ -103,7 +102,7 @@ relic --update
 ### Local dev
 
 ```bash
-uv tool install --editable .
+uv tool install --editable . --force
 ```
 
 ---
@@ -112,26 +111,36 @@ uv tool install --editable .
 
 Run all setup commands **in your terminal** — not inside the agent.
 
-### 1. Discover subprojects
+### 1. Initialize and index
 
 ```bash
 cd your-project
 relic init
 ```
 
-Walks the project, detects subprojects from package manifests and source directories, writes `relic.yaml`, adds `relic.yaml` and `.knowledge/` to `.gitignore`. Both are personal — gitignored by design.
+Scans the entire project tree, builds the knowledge graph via static analysis (no LLM), and adds `.knowledge/` to `.gitignore`. No config file required — every source file with a recognized extension is indexed automatically.
 
-### 2. Build the index
+To rebuild manually after significant changes:
 
 ```bash
 relic index
 ```
 
-Statically analyses all source files. No LLM. Extracts files, classes, functions, imports, and inheritance. Writes `.knowledge/index.pkl` and a human-readable `.knowledge/index.toon`.
+Or use `relic_reindex` from inside the agent session. To keep the index fresh automatically while you work, run `relic watch` in a separate terminal tab.
 
-Re-run after significant codebase changes, or use `relic_reindex` from inside the agent session. To keep the index fresh automatically while you work, run `relic watch` in a separate terminal tab.
+**Optional:** If you want subproject labels (for filtering search results), create a `relic.yaml` manually:
 
-### 3. Wire your agent
+```yaml
+subprojects:
+  api:
+    path: ./src/api
+    description: REST API
+  web:
+    path: ./src/web
+    description: Frontend
+```
+
+### 2. Wire your agent
 
 ```bash
 relic --init claude     # Claude Code    → CLAUDE.md + .claude/settings.json
@@ -242,8 +251,8 @@ For a single target file, prints what an agent would read manually (target file 
 ## Commands
 
 ```bash
-relic init                         # auto-discover subprojects, write relic.yaml
-relic index                        # build knowledge graph from source (no LLM)
+relic init                         # scan project, build knowledge graph (no LLM)
+relic index                        # rebuild knowledge graph from source
 relic query <file|symbol>          # print TOON context subgraph to stdout
 relic query Class.method           # symbol-scoped query via dotted notation
 relic query "fileA fileB"          # batch query — merged TOON output

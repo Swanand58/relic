@@ -256,10 +256,24 @@ For a single target file, prints what an agent would read manually (target file 
 
 ---
 
+## `relic init` vs `relic index`
+
+| | `relic init` | `relic index` |
+|---|---|---|
+| **When** | First-time setup | After code changes |
+| **Builds graph** | Yes | Yes |
+| **Adds `.knowledge/` to `.gitignore`** | Yes | No |
+| **Shows delta** | No | Yes (new/removed files, symbols, edges) |
+| **Shows skip stats** | No | Yes (skipped dirs, `.relicignore` exclusions) |
+
+Run `relic init` once per project. After that, use `relic index` to rebuild — or let `relic watch` / `relic_reindex` handle it automatically.
+
+---
+
 ## Commands
 
 ```bash
-relic init                         # scan project, build knowledge graph (no LLM)
+relic init                         # first-time setup: build graph, configure .gitignore
 relic index                        # rebuild graph, show delta + skip stats
 relic query <file|symbol>          # print TOON context subgraph to stdout
 relic query Class.method           # symbol-scoped query via dotted notation

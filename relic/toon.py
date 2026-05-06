@@ -90,6 +90,9 @@ def subgraph_to_toon(
     extends_edges: list[tuple[str, str]],
     tested_by_edges: list[tuple[str, str]] | None = None,
     uses_edges: list[tuple[str, str]] | None = None,
+    calls_edges: list[tuple[str, str]] | None = None,
+    exclude_tests: bool = False,
+    max_neighbor_symbols: int = 0,
 ) -> str:
     """Render a knowledge graph subgraph as a TOON document.
 
@@ -97,8 +100,12 @@ def subgraph_to_toon(
     - exports: full detail (name, type, line, signature) for the focus file
     - neighbor_symbols: name, type, file, signature for other files
 
-    Neighbor files are listed as paths only — no repeated symbol detail.
+    When *exclude_tests* is True, symbols from test files are dropped from
+    ``neighbor_symbols`` (saves 40–60% tokens at depth 2).  Test files still
+    appear in ``neighbors`` and ``tested_by`` edges are preserved.
     """
+    from relic.indexer import _is_test_file
+
     w = ToonWriter()
 
     w.kv("focus", focus_path).blank()
@@ -120,12 +127,31 @@ def subgraph_to_toon(
         ).blank()
 
     neighbor_symbols = [s for s in symbol_nodes if s["path"] != focus_path]
+    if exclude_tests:
+        neighbor_symbols = [s for s in neighbor_symbols if not _is_test_file(s["path"])]
+    truncated_count = 0
+    if max_neighbor_symbols > 0 and len(neighbor_symbols) > max_neighbor_symbols:
+        all_edges = list(import_edges) + list(define_edges) + list(extends_edges)
+        all_edges += list(tested_by_edges or []) + list(uses_edges or []) + list(calls_edges or [])
+        edge_refs: dict[str, int] = {}
+        for u, v in all_edges:
+            edge_refs[u] = edge_refs.get(u, 0) + 1
+            edge_refs[v] = edge_refs.get(v, 0) + 1
+        neighbor_symbols.sort(
+            key=lambda s: edge_refs.get(f"{s['name']}@{s['path']}", 0),
+            reverse=True,
+        )
+        truncated_count = len(neighbor_symbols) - max_neighbor_symbols
+        neighbor_symbols = neighbor_symbols[:max_neighbor_symbols]
     if neighbor_symbols:
         w.table(
             "neighbor_symbols",
             ["name", "type", "file", "signature"],
             [[s["name"], s["stype"], s["path"], s.get("signature", "")] for s in neighbor_symbols],
-        ).blank()
+        )
+        if truncated_count > 0:
+            w.comment(f"... and {truncated_count} more (use --depth 1 or exclude_tests=false to adjust)")
+        w.blank()
 
     focus_imports = [(a, b) for a, b in import_edges if a == focus_path]
     focus_imported_by = [(a, b) for a, b in import_edges if b == focus_path]
@@ -170,6 +196,25 @@ def subgraph_to_toon(
                 "callers",
                 ["file", "symbol"],
                 [[a, b.split("@")[0]] for a, b in callers],
+            ).blank()
+
+    if calls_edges:
+        focus_symbol_ids = {f"{s['name']}@{focus_path}" for s in focus_symbols}
+        # Outbound: focus file's symbols calling other symbols
+        outbound = [(a, b) for a, b in calls_edges if a in focus_symbol_ids]
+        if outbound:
+            w.table(
+                "calls",
+                ["caller", "callee"],
+                [[a.split("@")[0], b.split("@")[0]] for a, b in outbound],
+            ).blank()
+        # Inbound: other symbols calling into focus file's symbols
+        inbound = [(a, b) for a, b in calls_edges if b in focus_symbol_ids and a not in focus_symbol_ids]
+        if inbound:
+            w.table(
+                "called_by",
+                ["caller", "callee"],
+                [[a.split("@")[0], b.split("@")[0]] for a, b in inbound],
             ).blank()
 
     return w.build().strip()
@@ -222,6 +267,10 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
     uses_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "uses"]
     if uses_rows:
         w.table("uses", ["file", "symbol"], uses_rows).blank()
+
+    calls_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "calls"]
+    if calls_rows:
+        w.table("calls", ["caller", "callee"], calls_rows).blank()
 
     tested_by_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "tested_by"]
     if tested_by_rows:

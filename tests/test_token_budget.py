@@ -31,7 +31,7 @@ from relic.mcp_server import list_tools
 # at ~651 tokens and combined MCP tooling at ~364 tokens, so each cap has
 # breathing room without being so loose that a 30 % regression slips by.
 INSTRUCTION_BUDGET = 800
-MCP_TOTAL_BUDGET = 500
+MCP_TOTAL_BUDGET = 600
 
 
 class TestInstructionBudget:
@@ -69,7 +69,6 @@ class TestMcpBudget:
             cost = _tokens(t.description or "") + _tokens(str(t.inputSchema))
             assert cost <= per_tool_cap, f"{t.name} alone is {cost} tokens; per-tool cap is {per_tool_cap}."
 
-    def test_all_four_tools_present(self):
-        # Budget is meaningless if we silently lose a tool. Lock the surface.
+    def test_all_tools_present(self):
         names = {t.name for t in self._tools()}
-        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_stats"}
+        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_stats", "relic_diff"}

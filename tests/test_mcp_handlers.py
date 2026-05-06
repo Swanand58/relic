@@ -184,9 +184,9 @@ class TestToolDescriptions:
         tools = asyncio.run(list_tools())
         return {t.name: t for t in tools}
 
-    def test_all_four_tools_registered(self):
+    def test_all_tools_registered(self):
         tools = self._tools_by_name()
-        assert set(tools.keys()) == {"relic_query", "relic_search", "relic_reindex", "relic_stats"}
+        assert set(tools.keys()) == {"relic_query", "relic_search", "relic_reindex", "relic_stats", "relic_diff"}
 
     def test_query_describes_disambiguation(self):
         tools = self._tools_by_name()

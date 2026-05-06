@@ -26,9 +26,9 @@ from relic.toon import ToonWriter
 def _symbol_fingerprint(source: str, rel_path: str, project_root: Path, lang: str) -> set[str]:
     """Return a set of ``name:stype`` strings for symbols in a source file."""
     if lang == "python":
-        _, symbols, _ = _analyse_python(source, rel_path, project_root)
+        _, symbols, _, _ = _analyse_python(source, rel_path, project_root)
     elif lang in ("typescript", "javascript"):
-        _, symbols, _ = _analyse_typescript(source, rel_path, project_root)
+        _, symbols, _, _ = _analyse_typescript(source, rel_path, project_root)
     else:
         return set()
     return {f"{s['name']}:{s['stype']}" for s in symbols}

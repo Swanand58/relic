@@ -37,6 +37,7 @@ Edge types:
     defines   : file   → symbol  (file A defines symbol S)
     extends   : symbol → symbol  (class A extends class B)
     uses      : file   → symbol  (file A references symbol S from another file)
+    calls     : symbol → symbol  (function A calls function B)
     tested_by : file   → file    (source file → its test file)
     tests     : file   → file    (test file → the source it tests)
 """
@@ -90,6 +91,9 @@ LANGUAGE_MAP = {
     ".jsx": "javascript",
     ".mjs": "javascript",
     ".cjs": "javascript",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
 }
 
 MAX_FILE_BYTES = 200_000
@@ -133,24 +137,49 @@ def _extract_python_signature(node: ast.AST, source_lines: list[str]) -> str:
     return ""
 
 
+def _extract_python_calls(func_node: ast.AST) -> list[str]:
+    """Extract callee names from a function/method body.
+
+    Resolves ``ast.Call`` targets:
+    - ``Name`` nodes → ``foo``
+    - ``Attribute`` nodes → ``bar`` (the attribute, not ``obj.bar``)
+
+    Only top-level call names are returned; nested attribute chains like
+    ``a.b.c()`` resolve to ``c``.  The caller is responsible for matching
+    these against known symbol names in the graph.
+    """
+    callees: list[str] = []
+    for node in ast.walk(func_node):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            callees.append(func.id)
+        elif isinstance(func, ast.Attribute):
+            callees.append(func.attr)
+    return callees
+
+
 def _analyse_python(
     source: str, rel_path: str, project_root: Path
-) -> tuple[list[str], list[dict], list[tuple[str, str]]]:
+) -> tuple[list[str], list[dict], list[tuple[str, str]], list[tuple[str, str]]]:
     """Parse Python source with ast.
 
     Returns:
         imports        — list of resolved relative paths this file imports
         symbols        — list of dicts {name, stype, line, signature, extends?}
         imported_names — list of (resolved_path, symbol_name) from ``from X import Y``
+        calls          — list of (caller_symbol_name, callee_name) pairs
     """
     imports: list[str] = []
     symbols: list[dict] = []
     imported_names: list[tuple[str, str]] = []
+    calls: list[tuple[str, str]] = []
 
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return imports, symbols, imported_names
+        return imports, symbols, imported_names, calls
 
     source_lines = source.splitlines()
     file_dir = (project_root / rel_path).parent
@@ -197,7 +226,12 @@ def _analyse_python(
                         pass
             symbols.append(sym)
 
-    return imports, symbols, imported_names
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for callee in _extract_python_calls(node):
+                    if callee != node.name:
+                        calls.append((node.name, callee))
+
+    return imports, symbols, imported_names, calls
 
 
 def _resolve_python_import(module: str, file_dir: Path, project_root: Path, level: int = 0) -> str | None:
@@ -283,15 +317,54 @@ _TS_NAMED_IMPORT_RE = re.compile(
 )
 
 
+_TS_CALL_RE = re.compile(r"""\b(\w+)\s*\(""")
+
+
+def _extract_ts_calls(source: str, own_symbols: set[str], imported_symbols: set[str]) -> list[tuple[str, str]]:
+    """Extract call-like patterns from TS/JS source.
+
+    Since we lack AST-level function body scoping, we scan the entire file
+    for ``identifier(`` patterns and match against known symbol names
+    (both local and imported).  Returns (caller_function, callee) pairs
+    where caller_function is the enclosing function/arrow declaration.
+    """
+    calls: list[tuple[str, str]] = []
+    known = own_symbols | imported_symbols
+    lines = source.splitlines()
+    current_func: str | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        fm = _TS_FUNC_RE.search(line)
+        am = _TS_ARROW_RE.search(line)
+        if fm:
+            current_func = fm.group(1)
+        elif am:
+            current_func = am.group(1)
+
+        if not current_func:
+            continue
+        if stripped.startswith("import ") or stripped.startswith("export ") and "from" in stripped:
+            continue
+
+        for m in _TS_CALL_RE.finditer(line):
+            callee = m.group(1)
+            if callee in known and callee != current_func:
+                calls.append((current_func, callee))
+
+    return calls
+
+
 def _analyse_typescript(
     source: str, rel_path: str, project_root: Path
-) -> tuple[list[str], list[dict], list[tuple[str, str]]]:
+) -> tuple[list[str], list[dict], list[tuple[str, str]], list[tuple[str, str]]]:
     """Parse TypeScript/JS source with regex.
 
     Returns:
         imports        — list of resolved relative paths this file imports
         symbols        — list of dicts {name, stype, line, extends}
         imported_names — list of (resolved_path, symbol_name) from named imports
+        calls          — list of (caller_symbol_name, callee_name) pairs
     """
     imports: list[str] = []
     symbols: list[dict] = []
@@ -338,7 +411,11 @@ def _analyse_typescript(
                 if name_part:
                     imported_names.append((resolved, name_part))
 
-    return imports, symbols, imported_names
+    own_sym_names = {s["name"] for s in symbols}
+    imported_sym_names = {n for _, n in imported_names}
+    calls = _extract_ts_calls(source, own_sym_names, imported_sym_names)
+
+    return imports, symbols, imported_names, calls
 
 
 _TS_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]
@@ -612,12 +689,20 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
             continue
 
         imported_names: list[tuple[str, str]] = []
+        raw_calls: list[tuple[str, str]] = []
         if lang == "python":
-            imports, symbols, imported_names = _analyse_python(source, rel, project_root)
+            imports, symbols, imported_names, raw_calls = _analyse_python(source, rel, project_root)
         elif lang in ("typescript", "javascript"):
-            imports, symbols, imported_names = _analyse_typescript(source, rel, project_root)
+            imports, symbols, imported_names, raw_calls = _analyse_typescript(source, rel, project_root)
         else:
-            imports, symbols = [], []
+            from relic.parsers.base import get_parser
+
+            ts_parser = get_parser(lang)
+            if ts_parser:
+                ar = ts_parser.analyse(source, rel, project_root)
+                imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+            else:
+                imports, symbols = [], []
 
         for imp in imports:
             if imp in file_nodes and imp != rel:
@@ -657,6 +742,9 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
         if imported_names:
             G.graph.setdefault("_pending_uses", []).append((rel, imported_names))
 
+        if raw_calls:
+            G.graph.setdefault("_pending_calls", []).append((rel, raw_calls))
+
     # Third pass — resolve uses edges (file → symbol it imports by name)
     for importer_rel, name_pairs in G.graph.pop("_pending_uses", []):
         for target_file, sym_name in name_pairs:
@@ -664,7 +752,24 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
             if sid in G.nodes:
                 G.add_edge(importer_rel, sid, etype="uses")
 
-    # Fourth pass — test file mapping by naming convention
+    # Fourth pass — resolve calls edges (symbol → symbol)
+    for caller_file, call_pairs in G.graph.pop("_pending_calls", []):
+        for caller_name, callee_name in call_pairs:
+            caller_sid = f"{caller_name}@{caller_file}"
+            if caller_sid not in G.nodes:
+                continue
+            callee_sid = f"{callee_name}@{caller_file}"
+            if callee_sid in G.nodes:
+                G.add_edge(caller_sid, callee_sid, etype="calls")
+                continue
+            # Look for callee in imported symbols (cross-file calls)
+            for n, d in G.nodes(data=True):
+                if d.get("ntype") == "symbol" and d.get("name") == callee_name:
+                    if G.has_edge(caller_file, n) and G.edges[caller_file, n].get("etype") == "uses":
+                        G.add_edge(caller_sid, n, etype="calls")
+                        break
+
+    # Fifth pass — test file mapping by naming convention
     _add_test_mapping(G)
 
     return G, skip_stats

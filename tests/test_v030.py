@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from relic.indexer import (
     _collect_source_files,
     build_graph,
     run_index,
 )
+
+
+def _posix_paths(tmp_path: Path, files: list[tuple[Path, str]]) -> dict[str, str]:
+    """Convert collected files to {posix_relative_path: label} for cross-platform asserts."""
+    return {PurePosixPath(p.relative_to(tmp_path)).as_posix(): label for p, label in files}
 
 
 class TestZeroConfigIndexing:
@@ -38,7 +43,7 @@ class TestZeroConfigIndexing:
         (tmp_path / "app.py").write_text("print('hi')\n")
 
         files = _collect_source_files(tmp_path)
-        paths = {str(p.relative_to(tmp_path)) for p, _ in files}
+        paths = _posix_paths(tmp_path, files)
         assert "components/Button.tsx" in paths
         assert "utils/helpers.ts" in paths
         assert "app.py" in paths
@@ -50,7 +55,7 @@ class TestZeroConfigIndexing:
         (tmp_path / "app.js").write_text("const x = 1;\n")
 
         files = _collect_source_files(tmp_path)
-        paths = {str(p.relative_to(tmp_path)) for p, _ in files}
+        paths = _posix_paths(tmp_path, files)
         assert "app.js" in paths
         assert "node_modules/pkg/index.js" not in paths
 
@@ -62,7 +67,7 @@ class TestZeroConfigIndexing:
 
         subprojects = {"app": {"path": "./src"}}
         files = _collect_source_files(tmp_path, subprojects)
-        labels = {str(p.relative_to(tmp_path)): label for p, label in files}
+        labels = _posix_paths(tmp_path, files)
         assert labels["src/app.py"] == "app"
         assert labels["other.py"] == ""
 

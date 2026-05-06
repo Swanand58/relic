@@ -278,7 +278,7 @@ relic audit                        # measure relic's own token footprint
 relic benchmark <file>             # compare token cost of context with vs without relic
 relic mcp                          # start MCP stdio server (4 tools)
 
-relic --list                       # list subprojects in relic.yaml
+relic --list                       # list subprojects (if relic.yaml exists)
 relic --init <agent>               # write agent config + MCP registration
 relic --init all                   # write config for all supported agents
 relic --update                     # install latest GitHub release
@@ -326,13 +326,13 @@ Register once per project, all agents in the session get all four relic tools na
 
 **Static analysis only** — relic never executes your source. Python is parsed with `ast.parse` (parse-only, no eval); TypeScript and JavaScript are matched with regex. Reading a malicious repo cannot run code through relic.
 
-**Path traversal prevention** — subproject paths in `relic.yaml` are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected.
+**Path traversal prevention** — if subproject paths are defined in `relic.yaml`, they are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected.
 
 **Symlinks skipped** — the indexer ignores all symbolic links during traversal, so a malicious symlink pointing outside the project cannot pull foreign files into the graph. Same rule applies to `relic watch` and `relic coverage`.
 
 **File size limit** — skips files over 200 KB. Bounds per-file work and prevents a single bloated file from dominating the index.
 
-**No filesystem writes outside the project** — relic only writes to `.knowledge/` and (when explicitly invoked) `relic.yaml`, `.gitignore`, and the agent config files you ask it to update.
+**No filesystem writes outside the project** — relic only writes to `.knowledge/` and (when explicitly invoked) `.gitignore` and the agent config files you ask it to update.
 
 **No external calls** — no API calls, no telemetry. Code never leaves your machine. The only network calls relic makes are during `relic --update`: one GitHub API call to find the latest release tag, then `uv tool install` to reinstall from that tag.
 

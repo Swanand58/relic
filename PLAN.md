@@ -34,7 +34,7 @@ Goal: reduce per-query token waste and add `calls` edges so agents read fewer fi
 Prioritized by real agent usage — every feature must answer: "Does this save the agent
 a file read?"
 
-### 7a — Reduce noise (v0.3.1)
+### 7a — Reduce noise
 
 **7a.1: Filter test symbols from `neighbor_symbols`**
 
@@ -57,7 +57,7 @@ Expose `compute_diff` as an MCP tool so agents can check staleness without a CLI
 
 ---
 
-### 7b — Calls edges (v0.4.0)
+### 7b — Calls edges
 
 **7b.1: `calls` edges via Python AST**
 
@@ -79,7 +79,7 @@ function bodies against known exported symbols.
 
 ---
 
-### 7c — Smart depth (v0.4.0)
+### 7c — Smart depth
 
 **7c.1: Cap `neighbor_symbols` with importance ranking**
 
@@ -93,7 +93,7 @@ connectivity score). Most-connected symbols first.
 
 ---
 
-### 7d — tree-sitter integration (v0.5.0)
+### 7d — tree-sitter integration
 
 **7d.1: tree-sitter for multi-language support**
 
@@ -111,10 +111,8 @@ to 20+ languages, add tree-sitter as an optional dependency.
 
 | Release | Contains | Theme |
 |---------|----------|-------|
-| v0.3.1 | 7a.1 (filter test symbols) + 7a.2 (relic_diff MCP tool) | Reduce noise |
-| v0.4.0 | 7b.1–7b.2 (calls edges) + 7c.1 (smart depth) | Graph richness |
-| v0.5.0 | 7d.1 (tree-sitter infra) + Go/Rust/Java parsers | Language coverage |
-| v0.6.0 | Phase 8 features (see below) | Intelligence |
+| v0.4.0 | All of Phase 7 (7a–7d) | Token efficiency + graph richness |
+| v0.5.0 | Phase 8 features (see below) | Intelligence |
 
 ---
 

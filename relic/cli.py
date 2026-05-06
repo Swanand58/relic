@@ -197,6 +197,7 @@ def query_cmd(
         ..., help="File path, symbol name, Class.method, or space-separated targets.", metavar="TARGET"
     ),
     depth: int = typer.Option(2, "--depth", "-d", help="Graph traversal depth (hops)."),
+    exclude_tests: bool = typer.Option(True, help="Drop test-file symbols from neighbor_symbols."),
 ) -> None:
     """Query the knowledge graph for a file or symbol and print a TOON context subgraph.
 
@@ -206,7 +207,7 @@ def query_cmd(
     """
     from relic.mcp_server import _handle_query
 
-    result = _handle_query({"target": target, "depth": depth})
+    result = _handle_query({"target": target, "depth": depth, "exclude_tests": exclude_tests})
     text = result[0].text
 
     if text.startswith("Error:") or text.startswith("Not found:"):

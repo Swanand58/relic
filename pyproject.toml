@@ -18,6 +18,12 @@ dependencies = [
     "watchdog>=6.0.0",
 ]
 
+[project.optional-dependencies]
+treesitter = [
+    "tree-sitter>=0.24.0",
+    "tree-sitter-language-pack>=1.6.0",
+]
+
 [project.scripts]
 relic = "relic.cli:app"
 

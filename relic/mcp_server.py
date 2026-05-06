@@ -1,10 +1,11 @@
 """MCP server — exposes relic knowledge graph as native tools for coding agents.
 
-Four tools:
+Five tools:
   relic_query   — dependency context for a file or symbol (call before editing)
   relic_search  — search symbols/files across the graph by name
   relic_reindex — rebuild the knowledge graph after writing files
   relic_stats   — index health: file count, symbol count, last updated
+  relic_diff    — what changed since last index (new/deleted/changed files)
 
 Start with: relic mcp  (stdio transport, standard MCP protocol)
 
@@ -22,6 +23,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from relic.diff import compute_diff, diff_to_toon
 from relic.indexer import compute_stats, load_graph, run_index
 from relic.search import (
     available_subprojects,
@@ -78,7 +80,7 @@ def _bfs_subgraph(G, node_id: str, depth: int):
     return G.subgraph(visited)
 
 
-def _to_toon(subgraph, focus_path: str) -> str:
+def _to_toon(subgraph, focus_path: str, *, exclude_tests: bool = False, max_neighbor_symbols: int = 0) -> str:
     file_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "file"]
     symbol_nodes = [d for _, d in subgraph.nodes(data=True) if d.get("ntype") == "symbol"]
     import_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "imports"]
@@ -86,6 +88,7 @@ def _to_toon(subgraph, focus_path: str) -> str:
     extends_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "extends"]
     tested_by_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "tested_by"]
     uses_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "uses"]
+    calls_edges = [(u, v) for u, v, d in subgraph.edges(data=True) if d.get("etype") == "calls"]
     return subgraph_to_toon(
         focus_path=focus_path,
         file_nodes=file_nodes,
@@ -95,6 +98,9 @@ def _to_toon(subgraph, focus_path: str) -> str:
         extends_edges=extends_edges,
         tested_by_edges=tested_by_edges,
         uses_edges=uses_edges,
+        calls_edges=calls_edges,
+        exclude_tests=exclude_tests,
+        max_neighbor_symbols=max_neighbor_symbols,
     )
 
 
@@ -134,6 +140,16 @@ async def list_tools() -> list[Tool]:
                         "type": "integer",
                         "description": "BFS hops (default 2; use 1 for barrel files).",
                         "default": 2,
+                    },
+                    "exclude_tests": {
+                        "type": "boolean",
+                        "description": "Drop test symbols from neighbor_symbols (default true).",
+                        "default": True,
+                    },
+                    "max_neighbor_symbols": {
+                        "type": "integer",
+                        "description": "Cap neighbor_symbols to top N by connectivity (default 30, 0 = unlimited).",
+                        "default": 30,
                     },
                 },
                 "required": ["target"],
@@ -195,6 +211,18 @@ async def list_tools() -> list[Tool]:
                 "properties": {},
             },
         ),
+        Tool(
+            name="relic_diff",
+            description=(
+                "What changed since last index: new files, deleted files, changed "
+                "symbols. Call after merges or big edits to decide whether to "
+                "relic_reindex. Cheaper than a full reindex."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
     ]
 
 
@@ -214,6 +242,8 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
         return await _handle_reindex()
     if name == "relic_stats":
         return _handle_stats()
+    if name == "relic_diff":
+        return _handle_diff()
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -251,6 +281,8 @@ def _resolve_dotted(G, target: str) -> list[str]:
 def _handle_query(args: dict) -> list[TextContent]:
     target: str = args.get("target", "")
     depth: int = int(args.get("depth", 2))
+    exclude_tests: bool = args.get("exclude_tests", True)
+    max_neighbor_symbols: int = int(args.get("max_neighbor_symbols", 30))
 
     if not target:
         return [TextContent(type="text", text="Error: target is required.")]
@@ -262,17 +294,22 @@ def _handle_query(args: dict) -> list[TextContent]:
     targets = target.split() if " " in target else [target]
 
     if len(targets) == 1:
-        return _query_single(G, targets[0], depth)
+        return _query_single(
+            G, targets[0], depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols
+        )
 
-    # Batch mode: merge results for multiple targets
     sections: list[str] = []
     for t in targets:
-        result = _query_single(G, t, depth)
+        result = _query_single(
+            G, t, depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols
+        )
         sections.append(result[0].text)
     return [TextContent(type="text", text="\n\n---\n\n".join(sections))]
 
 
-def _query_single(G, target: str, depth: int) -> list[TextContent]:
+def _query_single(
+    G, target: str, depth: int, *, exclude_tests: bool = False, max_neighbor_symbols: int = 0
+) -> list[TextContent]:
     """Resolve and render a single target."""
     # Try dotted notation first (ClassName.method, File.Symbol)
     matches = _resolve_dotted(G, target)
@@ -300,7 +337,17 @@ def _query_single(G, target: str, depth: int) -> list[TextContent]:
     else:
         focus_path = node_id
 
-    return [TextContent(type="text", text=_to_toon(subgraph, focus_path))]
+    return [
+        TextContent(
+            type="text",
+            text=_to_toon(
+                subgraph,
+                focus_path,
+                exclude_tests=exclude_tests,
+                max_neighbor_symbols=max_neighbor_symbols,
+            ),
+        )
+    ]
 
 
 def _handle_search(args: dict) -> list[TextContent]:
@@ -378,6 +425,21 @@ def _handle_stats() -> list[TextContent]:
         lines.append(f"subprojects: {', '.join(stats['subprojects'])}")
 
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+def _handle_diff() -> list[TextContent]:
+    if not KNOWLEDGE_DIR.exists():
+        return [TextContent(type="text", text="Error: no index found. Call relic_reindex first.")]
+    try:
+        config = CONFIG_FILE if CONFIG_FILE.exists() else None
+        result = compute_diff(Path("."), KNOWLEDGE_DIR, config)
+    except Exception as exc:
+        return [TextContent(type="text", text=f"Error computing diff: {exc}")]
+
+    if not result["stale"]:
+        return [TextContent(type="text", text="status: up-to-date — no changes since last index")]
+
+    return [TextContent(type="text", text=diff_to_toon(result))]
 
 
 # ---------------------------------------------------------------------------

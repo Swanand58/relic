@@ -46,10 +46,10 @@ class TestComputeAudit:
         audit = compute_audit(tmp_path, tmp_path / ".knowledge")
         assert audit["verdict"] == "healthy"
 
-    def test_mcp_breakdown_has_all_four_tools(self, tmp_path: Path):
+    def test_mcp_breakdown_has_all_tools(self, tmp_path: Path):
         audit = compute_audit(tmp_path, tmp_path / ".knowledge")
         names = {t["name"] for t in audit["mcp_breakdown"]}
-        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_stats"}
+        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_stats", "relic_diff"}
 
     def test_mcp_breakdown_each_entry_shape(self, tmp_path: Path):
         audit = compute_audit(tmp_path, tmp_path / ".knowledge")

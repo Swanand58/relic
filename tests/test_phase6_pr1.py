@@ -23,7 +23,7 @@ from relic.toon import full_index_to_toon, subgraph_to_toon
 
 class TestPythonSignatures:
     def _syms(self, source: str) -> list[dict]:
-        _, symbols, _ = _analyse_python(source, "mod.py", Path("/fake"))
+        _, symbols, _, _ = _analyse_python(source, "mod.py", Path("/fake"))
         return symbols
 
     def test_simple_function(self):
@@ -66,7 +66,7 @@ class TestPythonSignatures:
 
 class TestTypeScriptSignatures:
     def _syms(self, source: str) -> list[dict]:
-        _, symbols, _ = _analyse_typescript(source, "mod.ts", Path("/fake"))
+        _, symbols, _, _ = _analyse_typescript(source, "mod.ts", Path("/fake"))
         return symbols
 
     def test_function_declaration(self):
@@ -337,7 +337,7 @@ class TestImportedNamesPython:
         (tmp_path / "models.py").write_text("class Order:\n    pass\nclass Receipt:\n    pass\n")
         (tmp_path / "proc.py").write_text("from models import Order, Receipt\n")
         source = (tmp_path / "proc.py").read_text()
-        _, _, imported = _analyse_python(source, "proc.py", tmp_path)
+        _, _, imported, _ = _analyse_python(source, "proc.py", tmp_path)
         names = [n for _, n in imported]
         assert "Order" in names
         assert "Receipt" in names
@@ -346,5 +346,5 @@ class TestImportedNamesPython:
         (tmp_path / "models.py").write_text("class Order:\n    pass\n")
         (tmp_path / "proc.py").write_text("from models import *\n")
         source = (tmp_path / "proc.py").read_text()
-        _, _, imported = _analyse_python(source, "proc.py", tmp_path)
+        _, _, imported, _ = _analyse_python(source, "proc.py", tmp_path)
         assert len(imported) == 0

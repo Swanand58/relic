@@ -164,14 +164,15 @@ Writes agent instructions and registers the relic MCP server in the right config
 
 ## MCP tools
 
-Relic exposes four tools over MCP (stdio transport):
+Relic exposes five tools over MCP (stdio transport):
 
 | Tool | When to call |
 |---|---|
-| `relic_query` | Before editing unfamiliar code — returns imports, exports, signatures, neighbors, callers, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`). |
+| `relic_query` | Before editing unfamiliar code — returns imports, exports, signatures, neighbors, callers, calls, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`). Filters test symbols by default. |
 | `relic_search` | When you don't know where a class/function/file lives |
 | `relic_reindex` | After creating, editing, or deleting source files |
 | `relic_stats` | To verify the index is fresh before a large refactor |
+| `relic_diff` | After merges or big edits — shows what changed since last index without a full reindex |
 
 See [docs/MCP.md](docs/MCP.md) for full tool reference and agent setup.
 
@@ -303,12 +304,21 @@ relic --version                    # print version
 
 ## What gets indexed
 
-| Language | Files | Symbols + Signatures | Imports | Inheritance | Test mapping |
-|---|---|---|---|---|---|
-| Python | ✓ | classes, functions (with full signatures) | ✓ (ast) | ✓ (`extends` edges) | ✓ (`test_foo.py`) |
-| TypeScript / TSX | ✓ | classes, functions, interfaces, types (with signatures) | ✓ | ✓ (`extends` edges) | ✓ (`foo.test.ts`, `foo.spec.ts`) |
-| JavaScript / JSX | ✓ | classes, functions (with signatures) | ✓ | ✓ | ✓ |
-| Other | ✓ (file nodes only) | — | — | — | — |
+| Language | Files | Symbols + Signatures | Imports | Calls | Inheritance | Test mapping |
+|---|---|---|---|---|---|---|
+| Python | ✓ | classes, functions (full signatures) | ✓ (ast) | ✓ (ast) | ✓ (`extends`) | ✓ (`test_foo.py`) |
+| TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ | ✓ (regex) | ✓ (`extends`) | ✓ (`foo.test.ts`) |
+| JavaScript / JSX | ✓ | classes, functions | ✓ | ✓ (regex) | ✓ | ✓ |
+| Go | ✓ | structs, interfaces, functions | ✓ | ✓ | — | — |
+| Rust | ✓ | structs, enums, traits, functions | ✓ | ✓ | ✓ (`impl`) | — |
+| Java | ✓ | classes, interfaces, methods | ✓ | ✓ | ✓ (`extends`) | — |
+| Other | ✓ (file nodes only) | — | — | — | — | — |
+
+Go, Rust, and Java support requires the optional `treesitter` extra:
+
+```bash
+pip install relic-graph[treesitter]
+```
 
 ---
 

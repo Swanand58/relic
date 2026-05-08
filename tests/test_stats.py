@@ -1,11 +1,14 @@
-"""Tests for compute_stats — shared by `relic stats` CLI and `relic_stats` MCP tool."""
+"""Tests for compute_stats — backs the `relic stats` CLI command.
+
+The matching `relic_stats` MCP tool was removed in Phase 7.5a; agents read
+freshness from the per-response `index{...}` header instead.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from relic.indexer import compute_stats
-from relic.mcp_server import _handle_stats
 
 
 class TestComputeStats:
@@ -40,21 +43,3 @@ class TestComputeStats:
         assert stats["last_updated"] != "unknown"
         # crude format check — YYYY-MM-DD HH:MM:SS
         assert len(stats["last_updated"]) == 19
-
-
-# ---------------------------------------------------------------------------
-# MCP _handle_stats — uses compute_stats under the hood
-# ---------------------------------------------------------------------------
-
-
-class TestHandleStats:
-    def test_no_index_returns_error(self, tmp_path: Path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        out = _handle_stats()
-        assert "no index found" in out[0].text.lower()
-
-    def test_renders_expected_keys(self, tmp_project: Path):
-        out = _handle_stats()
-        text = out[0].text
-        for key in ("last_updated:", "files:", "symbols:", "edges:"):
-            assert key in text

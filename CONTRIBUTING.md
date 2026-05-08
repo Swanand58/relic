@@ -65,7 +65,7 @@ pipeline first try.
 1. **Open an issue first** for anything bigger than a typo or a small bug
    fix. We'll agree on scope before you spend time writing code.
 2. **Branch from `main`.** Use a short, descriptive name:
-   `feat/coverage-csv-export`, `fix/watcher-windows-paths`,
+   `feat/coverage-csv-export`, `fix/incremental-windows-paths`,
    `chore/bump-rich`.
 3. **Keep PRs small.** A PR should do one thing. If you find yourself
    touching unrelated files, split into two PRs.
@@ -88,9 +88,9 @@ Use [Conventional Commits](https://www.conventionalcommits.org):
 
 ```
 feat(coverage): add csv export
-fix(watcher): debounce flush on shutdown
+fix(indexer): handle empty class bodies
 docs(readme): clarify init flow
-chore(deps): bump watchdog to 5.0
+chore(deps): bump networkx to 3.7
 test(audit): cover empty graph
 ```
 

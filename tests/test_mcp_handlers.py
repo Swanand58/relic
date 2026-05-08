@@ -186,7 +186,8 @@ class TestToolDescriptions:
 
     def test_all_tools_registered(self):
         tools = self._tools_by_name()
-        assert set(tools.keys()) == {"relic_query", "relic_search", "relic_reindex", "relic_stats", "relic_diff"}
+        # relic_stats was removed in 7.5a — freshness rides on every response.
+        assert set(tools.keys()) == {"relic_query", "relic_search", "relic_reindex", "relic_diff"}
 
     def test_query_describes_disambiguation(self):
         tools = self._tools_by_name()
@@ -204,11 +205,15 @@ class TestToolDescriptions:
         # the cost of skipping reindex must be spelled out
         assert "stale" in desc or "wrong" in desc
 
-    def test_stats_calls_for_followup_action(self):
+    def test_reindex_describes_incremental_path(self):
         tools = self._tools_by_name()
-        desc = tools["relic_stats"].description.lower()
-        # description should chain to relic_reindex when the index is old
-        assert "relic_reindex" in desc
+        desc = tools["relic_reindex"].description.lower()
+        assert "incremental" in desc
+
+    def test_diff_explains_when_to_use(self):
+        tools = self._tools_by_name()
+        desc = tools["relic_diff"].description.lower()
+        assert "stale" in desc or "changed" in desc
 
 
 # ---------------------------------------------------------------------------

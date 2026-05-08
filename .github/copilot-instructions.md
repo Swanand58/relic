@@ -10,9 +10,9 @@ manual file reads.
 
 - MUST call `relic_query <path>` before any Edit, Write, or non-trivial Read on a file you have not already loaded in this session.
 - MUST call `relic_query <symbol>` before introducing a new import or call site for a symbol whose definition you have not seen.
-- MUST call `relic_reindex` after creating, deleting, or moving source files. Subsequent queries against a stale index will return wrong context.
+- MUST call `relic_reindex` whenever the response header reports `stale=true` (or after you create, delete, or move source files). Reindex is incremental and sub-second.
 - SHOULD call `relic_search <name>` instead of grep / file listings when you do not know where a class, function, or file lives.
-- SHOULD call `relic_stats` before a large refactor to confirm the index is fresh; reindex if `last_updated` looks old.
+- DO NOT call any "stats" tool — every response carries an `index{age_s,stale,files_changed}` header. That is the only freshness signal you need.
 
 ### Decision tree
 
@@ -27,18 +27,15 @@ You don't know where something lives
     → `relic_search <name>` (use `kind=symbol` or `kind=file` to narrow,
       `subproject=<name>` in monorepos).
 
-You just created, deleted, or moved a source file
-    → `relic_reindex`.
-
-You suspect the index is stale
-    → `relic_stats`, then `relic_reindex` if `last_updated` is old.
+Response header says `stale=true`, or you just created / deleted / moved a file
+    → `relic_reindex`. (No need to call this proactively if `stale=false`.)
 
 ### Example call
 
 Try this on a real file in this project to see the output format:
 
 ```
-relic_query relic/cli.py
+relic_query tests/test_search.py
 ```
 
 ### Reading TOON output
@@ -67,7 +64,7 @@ TOON tables declare column names once, then list values row-by-row.
 ### CLI (if MCP unavailable)
 
 ```bash
-relic query relic/cli.py
+relic query tests/test_search.py
 relic search PaymentProcessor
 relic index
 ```

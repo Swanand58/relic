@@ -27,6 +27,11 @@ SCORE_EXACT = 3
 SCORE_PREFIX = 2
 SCORE_SUBSTRING = 1
 
+# Truncate signatures in search hits so a single TS arrow function with a
+# huge generic doesn't dominate the response budget.  Full signatures are
+# always available via relic_query.
+SIGNATURE_TRUNCATE = 80
+
 
 def _normalize(s: str) -> str:
     """Lowercase + strip non-alphanumeric — bridges snake_case / kebab-case / camelCase.
@@ -93,6 +98,34 @@ def _score(haystack: str, needle: str) -> int:
     return 0
 
 
+def _truncate_signature(sig: str) -> str:
+    if not sig:
+        return ""
+    if len(sig) <= SIGNATURE_TRUNCATE:
+        return sig
+    return sig[: SIGNATURE_TRUNCATE - 1] + "…"
+
+
+def _file_extras(G: nx.DiGraph, file_path: str) -> tuple[int, int]:
+    """Return ``(exports, imported_by)`` counts for a file node.
+
+    ``exports``     — number of symbols defined in this file
+    ``imported_by`` — number of files that import this file
+    """
+    if file_path not in G:
+        return 0, 0
+    exports = sum(1 for _, _, ed in G.out_edges(file_path, data=True) if ed.get("etype") == "defines")
+    importers = sum(1 for _, _, ed in G.in_edges(file_path, data=True) if ed.get("etype") == "imports")
+    return exports, importers
+
+
+def _symbol_callers(G: nx.DiGraph, sid: str) -> int:
+    """Return the count of inbound `uses` and `calls` edges to a symbol."""
+    if sid not in G:
+        return 0
+    return sum(1 for _, _, ed in G.in_edges(sid, data=True) if ed.get("etype") in ("uses", "calls"))
+
+
 def search_graph(
     G: nx.DiGraph,
     query: str,
@@ -138,10 +171,23 @@ def search_graph(
     file_hits.sort(key=lambda item: (-item[0], -item[1]))
     symbol_hits.sort(key=lambda item: (-item[0], -item[1]))
 
-    return (
-        [d for _, _, d in file_hits[:limit]],
-        [d for _, _, d in symbol_hits[:limit]],
-    )
+    file_results: list[dict] = []
+    for _, _, d in file_hits[:limit]:
+        exports, importers = _file_extras(G, d.get("path", ""))
+        file_results.append({**d, "exports": exports, "imported_by": importers})
+
+    symbol_results: list[dict] = []
+    for _, _, d in symbol_hits[:limit]:
+        sid = f"{d.get('name', '')}@{d.get('path', '')}"
+        symbol_results.append(
+            {
+                **d,
+                "signature": _truncate_signature(d.get("signature", "")),
+                "callers": _symbol_callers(G, sid),
+            }
+        )
+
+    return file_results, symbol_results
 
 
 def render_search_toon(
@@ -163,15 +209,32 @@ def render_search_toon(
     if file_matches:
         w.table(
             "file_matches",
-            ["path", "language"],
-            [[d.get("path", ""), d.get("language", "")] for d in file_matches],
+            ["path", "language", "exports", "imported_by"],
+            [
+                [
+                    d.get("path", ""),
+                    d.get("language", ""),
+                    d.get("exports", 0),
+                    d.get("imported_by", 0),
+                ]
+                for d in file_matches
+            ],
         ).blank()
 
     if symbol_matches:
         w.table(
             "symbol_matches",
-            ["name", "type", "file"],
-            [[d.get("name", ""), d.get("stype", ""), d.get("path", "")] for d in symbol_matches],
+            ["name", "type", "file", "signature", "callers"],
+            [
+                [
+                    d.get("name", ""),
+                    d.get("stype", ""),
+                    d.get("path", ""),
+                    d.get("signature", ""),
+                    d.get("callers", 0),
+                ]
+                for d in symbol_matches
+            ],
         ).blank()
 
     return w.build().strip()

@@ -28,7 +28,6 @@ from relic.search import (
 )
 from relic.style import console, err_console
 from relic.toon import full_index_to_toon
-from relic.watcher import run_watch
 
 app = typer.Typer(
     name="relic",
@@ -276,8 +275,8 @@ def search_cmd(
 def stats_cmd() -> None:
     """Print health metrics for the knowledge graph.
 
-    Shares logic with the `relic_stats` MCP tool — same numbers, different
-    display. Use this to confirm the index is fresh before a large refactor.
+    Human-facing report.  Agents read freshness from the per-response
+    `index{...}` header instead — the matching MCP tool was removed in 7.5a.
     """
     try:
         G = load_graph(KNOWLEDGE_DIR)
@@ -299,34 +298,6 @@ def stats_cmd() -> None:
         console.print(style.kv("subprojects", ", ".join(stats["subprojects"])))
 
 
-@app.command(name="watch")
-def watch_cmd(
-    debounce_ms: int = typer.Option(500, "--debounce-ms", help="Coalesce filesystem events within this window."),
-) -> None:
-    """Watch source files and rebuild the index on every change.
-
-    Run this in a terminal tab while you work. Useful when an agent forgets
-    to call relic_reindex — the index stays current automatically. Uses
-    OS-native filesystem events (FSEvents/inotify/ReadDirectoryChangesW),
-    not polling. Press Ctrl+C to stop.
-    """
-    if not (KNOWLEDGE_DIR / "index.pkl").exists():
-        console.print(style.error("no index found. run `relic index` once before `relic watch`."))
-        raise SystemExit(1)
-
-    config = CONFIG_FILE if CONFIG_FILE.exists() else None
-    try:
-        run_watch(
-            PROJECT_ROOT,
-            KNOWLEDGE_DIR,
-            config,
-            debounce_seconds=max(0.05, debounce_ms / 1000),
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        console.print(style.error(str(exc)))
-        raise SystemExit(1)
-
-
 @app.command(name="coverage")
 def coverage_cmd(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="List every skipped file, not just samples."),
@@ -335,7 +306,7 @@ def coverage_cmd(
 
     Without this, files dropped silently because of size limits, missing
     parsers, or symlink rules look like model errors instead of tool limits.
-    Use it after `relic index` (or `relic watch`) to audit coverage.
+    Use it after `relic index` to audit coverage.
     """
     subprojects = _load_subprojects()
     coverage = compute_coverage(PROJECT_ROOT, subprojects)
@@ -346,7 +317,9 @@ def coverage_cmd(
 def mcp_cmd() -> None:
     """Start the relic MCP server (stdio transport).
 
-    Exposes four tools: relic_query, relic_search, relic_reindex, relic_stats.
+    Exposes four tools: relic_query, relic_search, relic_reindex, relic_diff.
+    Every response is prefixed with an `index{...}` freshness header so agents
+    know when to call relic_reindex without a separate stats roundtrip.
     Works with any MCP-compatible agent (Claude Code, Cursor, Copilot, Codex).
     Configure in agent settings:
 

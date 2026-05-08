@@ -43,6 +43,8 @@ Edge types:
 """
 
 import ast
+import json
+import os
 import pickle
 import re
 from pathlib import Path, PurePosixPath
@@ -660,6 +662,188 @@ def _add_test_mapping(G: nx.DiGraph) -> None:
                     break
 
 
+_DERIVED_EDGE_TYPES = ("imports", "uses", "calls", "extends", "tested_by", "tests")
+
+
+def _safe_mtime(path: Path) -> float:
+    """Filesystem mtime, or 0.0 if the file is unreadable."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _analyse_one_file(
+    abs_path: Path,
+    rel_path: str,
+    lang: str,
+    project_root: Path,
+) -> dict | None:
+    """Parse a single file and return per-file analysis data.
+
+    Returns ``None`` if the file cannot be read.  Returns an empty-shaped dict
+    for unsupported languages (file node still gets created by the caller).
+    """
+    try:
+        source = abs_path.read_text(encoding="utf-8", errors="replace")
+    except (PermissionError, OSError):
+        return None
+
+    if lang == "python":
+        imports, symbols, imported_names, raw_calls = _analyse_python(source, rel_path, project_root)
+    elif lang in ("typescript", "javascript"):
+        imports, symbols, imported_names, raw_calls = _analyse_typescript(source, rel_path, project_root)
+    else:
+        from relic.parsers.base import get_parser
+
+        ts_parser = get_parser(lang)
+        if ts_parser:
+            ar = ts_parser.analyse(source, rel_path, project_root)
+            imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+        else:
+            imports, symbols, imported_names, raw_calls = [], [], [], []
+
+    return {
+        "imports": imports,
+        "symbols": symbols,
+        "imported_names": imported_names,
+        "raw_calls": raw_calls,
+    }
+
+
+def _remove_file_node(G: nx.DiGraph, rel_path: str) -> None:
+    """Remove a file node and every symbol it defines from the graph."""
+    if rel_path not in G.nodes:
+        return
+    sids = [n for n in list(G.successors(rel_path)) if G.nodes[n].get("ntype") == "symbol"]
+    for sid in sids:
+        G.remove_node(sid)
+    G.remove_node(rel_path)
+
+
+def _apply_file_data(
+    G: nx.DiGraph,
+    rel_path: str,
+    lang: str,
+    subproject: str,
+    mtime: float,
+    data: dict | None,
+) -> None:
+    """Add or replace a file node and its symbols using parsed analysis data.
+
+    Stashes per-file analysis (`file_imports`, `file_imported_names`) on the
+    file node and per-symbol call/extends data on symbol nodes so cross-file
+    edges can be re-derived later without re-parsing source.
+    """
+    # Drop existing symbol nodes for this file so a rebuild is idempotent.
+    if rel_path in G.nodes:
+        sids = [n for n in list(G.successors(rel_path)) if G.nodes[n].get("ntype") == "symbol"]
+        for sid in sids:
+            G.remove_node(sid)
+
+    if data is None:
+        # Unreadable — keep a bare file node so coverage / search still see it.
+        G.add_node(
+            rel_path,
+            ntype="file",
+            path=rel_path,
+            language=lang,
+            subproject=subproject,
+            mtime=mtime,
+            file_imports=[],
+            file_imported_names=[],
+        )
+        return
+
+    G.add_node(
+        rel_path,
+        ntype="file",
+        path=rel_path,
+        language=lang,
+        subproject=subproject,
+        mtime=mtime,
+        file_imports=list(data.get("imports", [])),
+        file_imported_names=[tuple(p) for p in data.get("imported_names", [])],
+    )
+
+    # Index calls per caller name so each symbol carries only its own callees.
+    calls_by_caller: dict[str, list[str]] = {}
+    for caller_name, callee_name in data.get("raw_calls", []):
+        calls_by_caller.setdefault(caller_name, []).append(callee_name)
+
+    for sym in data.get("symbols", []):
+        sid = f"{sym['name']}@{rel_path}"
+        G.add_node(
+            sid,
+            ntype="symbol",
+            name=sym["name"],
+            stype=sym["stype"],
+            path=rel_path,
+            line=sym.get("line", 0),
+            signature=sym.get("signature", ""),
+            extends_name=sym.get("extends", ""),
+            raw_calls=list(calls_by_caller.get(sym["name"], [])),
+        )
+        G.add_edge(rel_path, sid, etype="defines")
+
+
+def _resolve_cross_file_edges(G: nx.DiGraph) -> None:
+    """Drop and re-derive every edge type that depends on the global graph.
+
+    Cheap — no parsing.  Uses the per-file analysis data stashed on file and
+    symbol nodes by ``_apply_file_data``.
+    """
+    # Drop derived edges (keep `defines` — that's intra-file structural).
+    drop = [(u, v) for u, v, d in G.edges(data=True) if d.get("etype") in _DERIVED_EDGE_TYPES]
+    G.remove_edges_from(drop)
+
+    file_nodes: set[str] = {n for n, d in G.nodes(data=True) if d.get("ntype") == "file"}
+
+    syms_by_name: dict[str, list[str]] = {}
+    for n, d in G.nodes(data=True):
+        if d.get("ntype") == "symbol":
+            syms_by_name.setdefault(d["name"], []).append(n)
+
+    # imports + uses (file → file, file → symbol)
+    for f in file_nodes:
+        d = G.nodes[f]
+        for imp in d.get("file_imports", []):
+            if imp in file_nodes and imp != f:
+                G.add_edge(f, imp, etype="imports")
+        for target_file, sym_name in d.get("file_imported_names", []):
+            sid = f"{sym_name}@{target_file}"
+            if sid in G.nodes:
+                G.add_edge(f, sid, etype="uses")
+
+    # extends (symbol → symbol) and calls (symbol → symbol)
+    for n, d in list(G.nodes(data=True)):
+        if d.get("ntype") != "symbol":
+            continue
+        own_file = d.get("path", "")
+
+        parent_name = d.get("extends_name") or ""
+        if parent_name:
+            local_sid = f"{parent_name}@{own_file}"
+            if local_sid in G.nodes:
+                G.add_edge(n, local_sid, etype="extends")
+            else:
+                for cand in syms_by_name.get(parent_name, []):
+                    G.add_edge(n, cand, etype="extends")
+                    break
+
+        for callee_name in d.get("raw_calls", []):
+            local_sid = f"{callee_name}@{own_file}"
+            if local_sid in G.nodes:
+                G.add_edge(n, local_sid, etype="calls")
+                continue
+            for cand in syms_by_name.get(callee_name, []):
+                if G.has_edge(own_file, cand) and G.edges[own_file, cand].get("etype") == "uses":
+                    G.add_edge(n, cand, etype="calls")
+                    break
+
+    _add_test_mapping(G)
+
+
 def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx.DiGraph, dict]:
     """Build and return the full knowledge graph plus skip statistics.
 
@@ -667,111 +851,16 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
     If *subprojects* is provided, files are tagged with their subproject name.
     """
     G = nx.DiGraph()
-
     files, skip_stats = _collect_source_files(project_root, subprojects)
 
-    # First pass — add all file nodes
     for abs_path, subproject in files:
         rel = _posix_rel(abs_path, project_root)
         lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
-        G.add_node(rel, ntype="file", path=rel, language=lang, subproject=subproject)
+        mtime = _safe_mtime(abs_path)
+        data = _analyse_one_file(abs_path, rel, lang, project_root)
+        _apply_file_data(G, rel, lang, subproject, mtime, data)
 
-    file_nodes = set(G.nodes)
-
-    # Second pass — analyse each file
-    for abs_path, subproject in files:
-        rel = _posix_rel(abs_path, project_root)
-        lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
-
-        try:
-            source = abs_path.read_text(encoding="utf-8", errors="replace")
-        except (PermissionError, OSError):
-            continue
-
-        imported_names: list[tuple[str, str]] = []
-        raw_calls: list[tuple[str, str]] = []
-        if lang == "python":
-            imports, symbols, imported_names, raw_calls = _analyse_python(source, rel, project_root)
-        elif lang in ("typescript", "javascript"):
-            imports, symbols, imported_names, raw_calls = _analyse_typescript(source, rel, project_root)
-        else:
-            from relic.parsers.base import get_parser
-
-            ts_parser = get_parser(lang)
-            if ts_parser:
-                ar = ts_parser.analyse(source, rel, project_root)
-                imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
-            else:
-                imports, symbols = [], []
-
-        for imp in imports:
-            if imp in file_nodes and imp != rel:
-                G.add_edge(rel, imp, etype="imports")
-
-        # Symbol nodes + define edges
-        symbol_map: dict[str, str] = {}
-        for sym in symbols:
-            sid = f"{sym['name']}@{rel}"
-            G.add_node(
-                sid,
-                ntype="symbol",
-                name=sym["name"],
-                stype=sym["stype"],
-                path=rel,
-                line=sym.get("line", 0),
-                signature=sym.get("signature", ""),
-            )
-            G.add_edge(rel, sid, etype="defines")
-            symbol_map[sym["name"]] = sid
-
-        # Extends edges (Python + TS)
-        for sym in symbols:
-            if "extends" in sym:
-                parent_name = sym["extends"]
-                child_sid = f"{sym['name']}@{rel}"
-                parent_sid = symbol_map.get(parent_name)
-                if parent_sid is None:
-                    for node, data in G.nodes(data=True):
-                        if data.get("ntype") == "symbol" and data.get("name") == parent_name:
-                            parent_sid = node
-                            break
-                if parent_sid:
-                    G.add_edge(child_sid, parent_sid, etype="extends")
-
-        # Stash imported_names for uses-edge resolution after all symbols exist
-        if imported_names:
-            G.graph.setdefault("_pending_uses", []).append((rel, imported_names))
-
-        if raw_calls:
-            G.graph.setdefault("_pending_calls", []).append((rel, raw_calls))
-
-    # Third pass — resolve uses edges (file → symbol it imports by name)
-    for importer_rel, name_pairs in G.graph.pop("_pending_uses", []):
-        for target_file, sym_name in name_pairs:
-            sid = f"{sym_name}@{target_file}"
-            if sid in G.nodes:
-                G.add_edge(importer_rel, sid, etype="uses")
-
-    # Fourth pass — resolve calls edges (symbol → symbol)
-    for caller_file, call_pairs in G.graph.pop("_pending_calls", []):
-        for caller_name, callee_name in call_pairs:
-            caller_sid = f"{caller_name}@{caller_file}"
-            if caller_sid not in G.nodes:
-                continue
-            callee_sid = f"{callee_name}@{caller_file}"
-            if callee_sid in G.nodes:
-                G.add_edge(caller_sid, callee_sid, etype="calls")
-                continue
-            # Look for callee in imported symbols (cross-file calls)
-            for n, d in G.nodes(data=True):
-                if d.get("ntype") == "symbol" and d.get("name") == callee_name:
-                    if G.has_edge(caller_file, n) and G.edges[caller_file, n].get("etype") == "uses":
-                        G.add_edge(caller_sid, n, etype="calls")
-                        break
-
-    # Fifth pass — test file mapping by naming convention
-    _add_test_mapping(G)
-
+    _resolve_cross_file_edges(G)
     return G, skip_stats
 
 
@@ -780,12 +869,19 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
 # ---------------------------------------------------------------------------
 
 
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Write *payload* to *path* atomically (tmp + os.replace)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("wb") as f:
+        f.write(payload)
+    os.replace(tmp, path)
+
+
 def save_graph(G: nx.DiGraph, knowledge_dir: Path) -> None:
-    """Serialize the graph to .knowledge/index.pkl."""
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
-    pkl_path = knowledge_dir / "index.pkl"
-    with pkl_path.open("wb") as f:
-        pickle.dump(G, f, protocol=pickle.HIGHEST_PROTOCOL)
+    """Serialize the graph to .knowledge/index.pkl atomically."""
+    payload = pickle.dumps(G, protocol=pickle.HIGHEST_PROTOCOL)
+    _atomic_write_bytes(knowledge_dir / "index.pkl", payload)
 
 
 def load_graph(knowledge_dir: Path) -> nx.DiGraph:
@@ -801,6 +897,39 @@ def load_graph(knowledge_dir: Path) -> nx.DiGraph:
 
 
 # ---------------------------------------------------------------------------
+# Mtime sidecar (powers incremental reindex + freshness header)
+# ---------------------------------------------------------------------------
+
+
+def save_mtimes(knowledge_dir: Path, mtimes: dict[str, float]) -> None:
+    """Write the per-file mtime sidecar atomically."""
+    payload = json.dumps(mtimes, sort_keys=True).encode("utf-8")
+    _atomic_write_bytes(knowledge_dir / "mtimes.json", payload)
+
+
+def load_mtimes(knowledge_dir: Path) -> dict[str, float]:
+    """Load the mtime sidecar, or return ``{}`` if missing/corrupt."""
+    path = knowledge_dir / "mtimes.json"
+    if not path.exists():
+        return {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {k: float(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _mtimes_from_graph(G: nx.DiGraph) -> dict[str, float]:
+    """Extract the per-file mtime map embedded on file nodes."""
+    out: dict[str, float] = {}
+    for n, d in G.nodes(data=True):
+        if d.get("ntype") == "file":
+            out[n] = float(d.get("mtime", 0.0) or 0.0)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -808,8 +937,9 @@ def load_graph(knowledge_dir: Path) -> nx.DiGraph:
 def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
     """Return health metrics for the loaded knowledge graph.
 
-    Single source of truth for both `relic stats` (CLI) and `relic_stats`
-    (MCP tool) so the two paths can never drift.
+    Backs the `relic stats` CLI command (human-facing).  The matching MCP
+    tool was removed in Phase 7.5a — agents read freshness from the
+    per-response `index{...}` header instead.
 
     Keys:
         last_updated     ISO-ish timestamp of index.pkl mtime, or "unknown"
@@ -852,18 +982,98 @@ def compute_stats(G: nx.DiGraph, knowledge_dir: Path) -> dict:
     }
 
 
-def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None = None) -> tuple[nx.DiGraph, dict]:
-    """Build graph, save to knowledge_dir.  Returns (graph, skip_stats).
-
-    If *config_file* points to an existing relic.yaml, subproject labels are
-    read from it.  Otherwise the full project tree is indexed without labels.
-    """
-    subprojects: dict = {}
+def _load_subprojects(config_file: Path | None) -> dict:
     if config_file and config_file.exists():
         with config_file.open(encoding="utf-8") as f:
             cfg = yaml.safe_load(f) or {}
-        subprojects = cfg.get("subprojects", {})
+        return cfg.get("subprojects", {}) or {}
+    return {}
 
+
+def run_index(project_root: Path, knowledge_dir: Path, config_file: Path | None = None) -> tuple[nx.DiGraph, dict]:
+    """Build the full graph from scratch and persist it.
+
+    Cold-start path used by ``relic index`` and ``relic init``.  Writes both
+    the pickled graph and the ``mtimes.json`` sidecar so subsequent reindex
+    calls can run incrementally.
+    """
+    subprojects = _load_subprojects(config_file)
     G, skip_stats = build_graph(project_root, subprojects)
     save_graph(G, knowledge_dir)
+    save_mtimes(knowledge_dir, _mtimes_from_graph(G))
     return G, skip_stats
+
+
+def incremental_index(
+    project_root: Path,
+    knowledge_dir: Path,
+    config_file: Path | None = None,
+) -> tuple[nx.DiGraph, dict]:
+    """Update the graph in place, reparsing only files whose mtime changed.
+
+    Raises ``FileNotFoundError`` if no existing index is present — the caller
+    (CLI or MCP) is expected to surface a clear message instructing the user
+    to run a full ``relic index`` first.
+
+    Returns ``(graph, summary)``.  The summary keys are:
+        added       count of new files added to the graph
+        modified    count of existing files reparsed
+        deleted     count of files removed from the graph
+        unchanged   count of files skipped (mtime unchanged)
+        elapsed_s   wall-clock seconds for the incremental update
+        skip_stats  same shape returned by ``_collect_source_files``
+    """
+    import time as _time
+
+    t0 = _time.monotonic()
+    G = load_graph(knowledge_dir)  # raises FileNotFoundError if missing
+
+    # Prefer mtimes embedded on file nodes; fall back to the sidecar so we
+    # remain compatible with graphs written by older relic versions.
+    old_mtimes = _mtimes_from_graph(G) or load_mtimes(knowledge_dir)
+
+    subprojects = _load_subprojects(config_file)
+    files, skip_stats = _collect_source_files(project_root, subprojects)
+
+    current: dict[str, tuple[Path, str, float]] = {}
+    for abs_path, subproject in files:
+        rel = _posix_rel(abs_path, project_root)
+        current[rel] = (abs_path, subproject, _safe_mtime(abs_path))
+
+    old_paths = set(old_mtimes.keys())
+    new_paths = set(current.keys())
+
+    deleted = old_paths - new_paths
+    added = new_paths - old_paths
+    # Use != rather than > so that filesystems with low mtime resolution and
+    # editors that rewrite-with-older-timestamp still trigger a reparse.
+    modified = {rel for rel in (new_paths & old_paths) if current[rel][2] != old_mtimes.get(rel, 0.0)}
+
+    touched = added | modified
+
+    for rel in deleted:
+        _remove_file_node(G, rel)
+
+    for rel in touched:
+        abs_path, subproject, mtime = current[rel]
+        lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
+        data = _analyse_one_file(abs_path, rel, lang, project_root)
+        _apply_file_data(G, rel, lang, subproject, mtime, data)
+
+    if touched or deleted:
+        _resolve_cross_file_edges(G)
+        save_graph(G, knowledge_dir)
+
+    # Always refresh the sidecar so it tracks what's actually on disk now,
+    # even when nothing changed (e.g. clock drift recovery).
+    save_mtimes(knowledge_dir, {rel: current[rel][2] for rel in current})
+
+    summary = {
+        "added": len(added),
+        "modified": len(modified),
+        "deleted": len(deleted),
+        "unchanged": len(new_paths) - len(touched),
+        "elapsed_s": _time.monotonic() - t0,
+        "skip_stats": skip_stats,
+    }
+    return G, summary

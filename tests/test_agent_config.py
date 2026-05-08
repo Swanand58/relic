@@ -46,7 +46,16 @@ class TestInstructionsContent:
 
     def test_should_rules_present(self):
         assert "SHOULD call `relic_search" in RELIC_INSTRUCTIONS
-        assert "SHOULD call `relic_stats`" in RELIC_INSTRUCTIONS
+
+    def test_no_stats_rule_present(self):
+        # `relic_stats` MCP tool was removed in 7.5a — freshness rides the
+        # response header.  Instructions must not tell agents to call it.
+        assert "relic_stats" not in RELIC_INSTRUCTIONS
+
+    def test_freshness_header_explained(self):
+        # The header is the only freshness signal agents have — make sure
+        # the instructions point at it explicitly.
+        assert "stale=true" in RELIC_INSTRUCTIONS or "index{" in RELIC_INSTRUCTIONS
 
     def test_decision_tree_section_present(self):
         assert "### Decision tree" in RELIC_INSTRUCTIONS

@@ -1,11 +1,15 @@
 # Relic MCP Server
 
 Relic exposes a Model Context Protocol (MCP) server over stdio. Any MCP-compatible
-agent can call the five relic tools natively — no shell commands, no prompting required.
+agent can call the four relic tools natively — no shell commands, no prompting required.
 
 ```bash
 relic mcp    # start the server (stdio transport)
 ```
+
+Every response begins with a one-line `index{age_s,stale,files_changed}` header so
+the agent always knows whether the graph is fresh — there is no separate "stats"
+tool to call. See [Freshness header](#freshness-header) below.
 
 ---
 
@@ -155,70 +159,57 @@ Search for files and symbols across the knowledge graph by name.
 **Output:**
 
 ```
-search: "processor"
+search: processor
 
-file_matches[2]{path,language,subproject}:
-  src/payments/processor.py,python,payments
-  src/core/preprocessor.ts,typescript,core
+file_matches[2]{path,language,exports,imported_by}:
+  src/payments/processor.py,python,4,3
+  src/core/preprocessor.ts,typescript,2,1
 
-symbol_matches[3]{name,type,file}:
-  PaymentProcessor,class,src/payments/processor.py
-  DataProcessor,class,src/core/preprocessor.ts
-  process_payment,function,src/payments/processor.py
+symbol_matches[3]{name,type,file,signature,callers}:
+  PaymentProcessor,class,src/payments/processor.py,PaymentProcessor,5
+  DataProcessor,class,src/core/preprocessor.ts,DataProcessor(BaseProcessor),2
+  process_payment,function,src/payments/processor.py,process_payment(order: Order) -> Receipt,7
 ```
+
+Each hit carries enough context to skip the follow-up `relic_query` call in
+the common case: file results show `exports` (symbol count) and
+`imported_by` (in-edges); symbol results carry the signature and `callers`
+count (inbound `uses` + `calls` edges).  Signatures over 80 characters are
+truncated with `…`; query the symbol directly for the full text.
 
 **Tips:**
 - Search by partial name: `"proc"` matches `processor`, `preprocess`, `ProducerConfig`
 - Search by directory: `"payments/"` returns only files in the payments subproject
-- After finding the file, call `relic_query` on it for full context
+- Only follow up with `relic_query` when you need neighbors / full graph context
 
 ---
 
 ### `relic_reindex`
 
-Rebuild the knowledge graph from source code.
+Incrementally update the knowledge graph from source.
 
-**When to call:** after creating, editing, or deleting source files.
+**When to call:** when the response header reports `stale=true`, or after you
+create, delete, or move source files.
 
 **Parameters:** none.
 
 **Output:**
 
 ```
-reindex: done in 2.3s
-files: 84
-symbols: 612
-edges: 1,204
+index{age_s,stale,files_changed}: 0,false,0
+reindex: incremental in 0.06s
+changed: +1 new, ~2 modified, -0 deleted, =79 unchanged
+files: 82
+symbols: 598
+edges: 1,180
 ```
 
 **Notes:**
-- Runs synchronously — takes 1–10 seconds depending on codebase size
-- Safe to call multiple times — rewrites the index in place
-- Equivalent to running `relic index` in the terminal
-
----
-
-### `relic_stats`
-
-Check knowledge graph health.
-
-**When to call:** to verify the index is fresh before a large refactor, or when
-`relic_query` returns unexpected results.
-
-**Parameters:** none.
-
-**Output:**
-
-```
-last_updated: 2026-05-03 14:22:01
-files: 84
-symbols: 612
-edges: 1,204
-  defines: 612
-  imports: 571
-  extends: 21
-subprojects: core, payments, workers
-```
+- Reparses only files whose mtime changed since the last index. Sub-second on
+  large repos in steady state.
+- If no index exists yet, the call returns an error asking the user to run
+  `relic index` once. The MCP server never does a full cold-start build —
+  that path stays in the CLI to avoid blowing past MCP request timeouts.
 
 ---
 
@@ -252,6 +243,31 @@ changed_symbols[4]{file,name,status}:
 **Notes:**
 - Lightweight — compares on-disk source against the stored graph without rebuilding
 - If the diff shows changes, follow up with `relic_reindex` to update the graph
+
+---
+
+## Freshness header
+
+Every MCP response is prefixed with one line:
+
+```
+index{age_s,stale,files_changed}: 42,false,0
+```
+
+| Field | Meaning |
+|---|---|
+| `age_s` | Seconds since `index.pkl` was last written |
+| `stale` | `true` iff at least one source file has changed, been added, or deleted relative to the saved index |
+| `files_changed` | Total count of differing files (added + modified + deleted) |
+
+If no index exists yet, the header collapses to `index{indexed,stale}: false,true`
+and the body explains how to bootstrap it.
+
+The header is computed via a cheap `stat()` sweep against `.knowledge/mtimes.json`
+and cached for 2 seconds, so back-to-back calls in the same agent turn pay the
+cost only once. Agents should treat `stale=true` as the sole signal to call
+`relic_reindex` — there is no separate "stats" tool, and proactive reindexing
+when `stale=false` is wasted work.
 
 ---
 
@@ -290,45 +306,49 @@ so you don't need to read the caller file to understand the dependency.
 
 ```
 → relic_query("src/payments/processor.py")
-  Read: exports, what it imports, who calls it
+  Read: exports, what it imports, who calls it.
+  Header: stale=false → graph is current.
 → Read the file
 → Edit the file
-→ relic_reindex()   ← keep index fresh
 ```
+
+Don't call `relic_reindex` proactively. The next response's header will
+report `stale=true` if your edits drifted the graph; only then reindex.
 
 ### Finding where something lives
 
 ```
 → relic_search("PaymentProcessor")
-  Read: file_matches, symbol_matches
-→ relic_query("src/payments/processor.py")
-  Read: full context before editing
+  Hit carries signature + caller count + defining file.
+  In most cases that's enough to keep going — no follow-up needed.
+→ relic_query("src/payments/processor.py")   # only if you need neighbours
 ```
 
 ### Before a large refactor
 
 ```
-→ relic_stats()
-  Check: last_updated — is index fresh?
-→ relic_reindex() if stale
 → relic_query("src/core/database.py", depth=3)
-  Read: wide graph context
+  Header reports stale=false → graph is current.
+→ Read: wide graph context, plan the changes.
 ```
+
+If the header reports `stale=true`, call `relic_reindex` once first — the
+incremental update is sub-second.
 
 ---
 
 ## Troubleshooting
 
-**`Error: no index found. Call relic_reindex first.`**
-Index hasn't been built. Call `relic_reindex` or run `relic index` in the terminal.
+**`Error: no index found. Ask the user to run relic index ...`**
+The graph hasn't been built yet. The MCP server intentionally refuses to do a
+full cold-start build (it would blow past client timeouts on large repos). Have
+the user run `relic index` once in the project root. Subsequent `relic_reindex`
+calls from the agent are incremental and fast.
 
 **`Not found: 'X'. Try relic_search or relic_reindex if recently added.`**
 Node not in index. Either the file was added after the last index, or the path is wrong.
 Use `relic_search` to find the correct path, or call `relic_reindex` to rebuild.
 
-**`relic_reindex` fails with `FileNotFoundError`**
-No index found. Run `relic init` in the project root first.
-
 **Index is stale after editing files**
-Call `relic_reindex` after any file write/delete to keep the graph accurate.
-Or run `relic watch` in a terminal tab for automatic rebuilds on file changes.
+The freshness header on the next response will say `stale=true`. Call
+`relic_reindex` — incremental, sub-second.

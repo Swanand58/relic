@@ -38,9 +38,9 @@ manual file reads.
 
 - MUST call `relic_query <path>` before any Edit, Write, or non-trivial Read on a file you have not already loaded in this session.
 - MUST call `relic_query <symbol>` before introducing a new import or call site for a symbol whose definition you have not seen.
-- MUST call `relic_reindex` after creating, deleting, or moving source files. Subsequent queries against a stale index will return wrong context.
+- MUST call `relic_reindex` whenever the response header reports `stale=true` (or after you create, delete, or move source files). Reindex is incremental and sub-second.
 - SHOULD call `relic_search <name>` instead of grep / file listings when you do not know where a class, function, or file lives.
-- SHOULD call `relic_stats` before a large refactor to confirm the index is fresh; reindex if `last_updated` looks old.
+- DO NOT call any "stats" tool — every response carries an `index{age_s,stale,files_changed}` header. That is the only freshness signal you need.
 
 ### Decision tree
 
@@ -55,11 +55,8 @@ You don't know where something lives
     → `relic_search <name>` (use `kind=symbol` or `kind=file` to narrow,
       `subproject=<name>` in monorepos).
 
-You just created, deleted, or moved a source file
-    → `relic_reindex`.
-
-You suspect the index is stale
-    → `relic_stats`, then `relic_reindex` if `last_updated` is old.
+Response header says `stale=true`, or you just created / deleted / moved a file
+    → `relic_reindex`. (No need to call this proactively if `stale=false`.)
 
 ### Example call
 
@@ -282,7 +279,7 @@ def init_agent(agent_key: str, project_root: Path) -> None:
         mcp_action = _write_mcp_config(agent_key, project_root)
         config_path = project_root / agent["mcp_config"]
         console.print(f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} [dim]{config_path}[/dim]")
-        console.print("[dim]tools: relic_query, relic_search, relic_reindex, relic_stats[/dim]")
+        console.print("[dim]tools: relic_query, relic_search, relic_reindex, relic_diff[/dim]")
 
 
 def init_all_agents(project_root: Path) -> None:

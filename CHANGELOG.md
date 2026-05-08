@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Incremental reindex**: `relic_reindex` now stat-sweeps the project tree and
+  reparses only files whose mtime changed since the last index. Sub-second on
+  large monorepos. Backed by a new `.knowledge/mtimes.json` sidecar (atomic
+  writes).
+- **Freshness header**: every MCP response is prefixed with
+  `index{age_s,stale,files_changed}`. Agents read it to decide when to call
+  `relic_reindex`. Cached for 2 s so back-to-back calls in the same turn pay
+  the stat-sweep cost only once.
+
+### Changed
+
+- **`relic_reindex` MCP tool** is now incremental-only. If no index exists yet
+  the call returns a clear error asking the user to run `relic index` once
+  manually — the MCP server intentionally does not perform full cold-start
+  rebuilds (they would blow past client request timeouts on large repos).
+
+### Removed
+
+- **`relic_stats` MCP tool**: removed. Freshness rides on every response
+  header instead. The `relic stats` CLI command is unchanged for human use.
+- **`relic watch` CLI command + `relic/watcher.py`**: removed. With incremental
+  reindex and the freshness header, the agent owns staleness — a separate
+  background watcher process (and the `watchdog` dependency) is no longer
+  needed.
+
 ## [0.2.3] - 2026-05-05
 
 ### Fixed

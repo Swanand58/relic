@@ -15,7 +15,6 @@ dependencies = [
     "PyYAML>=6.0.3",
     "rich>=15.0.0",
     "typer>=0.25.1",
-    "watchdog>=6.0.0",
 ]
 
 [project.optional-dependencies]

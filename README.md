@@ -126,7 +126,7 @@ To rebuild after changes:
 relic index
 ```
 
-Shows a delta (what changed since last index), which directories were skipped, and how many files were excluded by `.relicignore`. Or use `relic_reindex` from inside the agent session, or `relic watch` in a separate terminal tab to auto-rebuild on file changes.
+Shows a delta (what changed since last index), which directories were skipped, and how many files were excluded by `.relicignore`. After the first `relic index`, agents call `relic_reindex` themselves — it's incremental (sub-second) and the response header tells them when it's needed.
 
 **Optional:** To exclude files from indexing, create a `.relicignore` in your project root (same syntax as `.gitignore`):
 
@@ -164,15 +164,16 @@ Writes agent instructions and registers the relic MCP server in the right config
 
 ## MCP tools
 
-Relic exposes five tools over MCP (stdio transport):
+Relic exposes four tools over MCP (stdio transport). Every response is prefixed
+with an `index{age_s,stale,files_changed}` header so agents know when to reindex
+without a separate stats roundtrip.
 
 | Tool | When to call |
 |---|---|
 | `relic_query` | Before editing unfamiliar code — returns imports, exports, signatures, neighbors, callers, calls, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`). Filters test symbols by default. |
 | `relic_search` | When you don't know where a class/function/file lives |
-| `relic_reindex` | After creating, editing, or deleting source files |
-| `relic_stats` | To verify the index is fresh before a large refactor |
-| `relic_diff` | After merges or big edits — shows what changed since last index without a full reindex |
+| `relic_reindex` | When the response header reports `stale=true`, or after creating, editing, or deleting source files. Incremental, sub-second. |
+| `relic_diff` | When you want a per-file breakdown of what changed before reindexing |
 
 See [docs/MCP.md](https://github.com/Swanand58/relic/blob/main/docs/MCP.md) for full tool reference and agent setup.
 
@@ -194,13 +195,14 @@ Output is TOON (Token-Oriented Object Notation) — tabular format that declares
 
 ## Keep the index fresh
 
-```bash
-relic watch
-```
+The agent owns this. `relic_reindex` is **incremental** — it stat-sweeps the
+project tree, reparses only files whose mtime changed, and finishes in well under
+a second on large repos. Every MCP response carries an `index{...}` header that
+tells the agent whether `stale=true`, so there's no need for a separate
+"is the index fresh?" tool, no background watcher process, and no extra terminal tab.
 
-Runs in the foreground in a terminal tab. Listens to OS-native filesystem events (FSEvents on macOS, inotify on Linux, ReadDirectoryChangesW on Windows — no polling) and rebuilds the index when source files change. Bursts of edits are coalesced into a single reindex via a 500 ms debounce. Press Ctrl+C to stop.
-
-Useful when an agent forgets to call `relic_reindex` after writing files — the watcher backfills the gap. Same parser, same security posture as `relic index`: parse-only static analysis, symlinks skipped, files over 200 KB skipped, nothing executed.
+If you want to rebuild manually (after a big rebase or a tooling change), run
+`relic index` — same as before.
 
 ## Audit coverage
 
@@ -267,7 +269,7 @@ For a single target file, prints what an agent would read manually (target file 
 | **Shows delta** | No | Yes (new/removed files, symbols, edges) |
 | **Shows skip stats** | No | Yes (skipped dirs, `.relicignore` exclusions) |
 
-Run `relic init` once per project. After that, use `relic index` to rebuild — or let `relic watch` / `relic_reindex` handle it automatically.
+Run `relic init` once per project. After that, the agent's `relic_reindex` tool keeps the graph current incrementally; only run `relic index` again if you want a manual full rebuild.
 
 ---
 
@@ -285,8 +287,6 @@ relic search <term> -k symbol      # filter to symbols (or `file`, `all`)
 relic search <term> -s <name>      # restrict to a subproject
 relic stats                        # index health: counts, last_updated, subprojects
 relic diff                         # what changed since last index (new/deleted/changed)
-relic watch                        # rebuild index automatically on file changes
-relic watch --debounce-ms 200      # tighter debounce window (default 500 ms)
 relic coverage                     # what's indexed vs skipped, with reasons
 relic coverage -v                  # list every skipped file (not just samples)
 relic audit                        # measure relic's own token footprint
@@ -352,7 +352,7 @@ Register once per project, all agents in the session get all four relic tools na
 
 **Path traversal prevention** — if subproject paths are defined in `relic.yaml`, they are resolved and checked against the project root. Entries like `path: /etc` or `path: ../../secrets` are rejected.
 
-**Symlinks skipped** — the indexer ignores all symbolic links during traversal, so a malicious symlink pointing outside the project cannot pull foreign files into the graph. Same rule applies to `relic watch` and `relic coverage`.
+**Symlinks skipped** — the indexer ignores all symbolic links during traversal, so a malicious symlink pointing outside the project cannot pull foreign files into the graph. Same rule applies to `relic coverage` and incremental reindexes.
 
 **File size limit** — skips files over 200 KB. Bounds per-file work and prevents a single bloated file from dominating the index.
 

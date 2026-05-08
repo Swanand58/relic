@@ -141,19 +141,61 @@ class TestRenderSearchToon:
         files, _ = search_graph(sample_graph, "processor", kind="file")
         out = render_search_toon("processor", files, [])
         assert "file_matches[" in out
-        assert "{path,language}" in out
+        assert "{path,language,exports,imported_by}" in out
 
     def test_includes_symbol_matches_table(self, sample_graph):
         _, symbols = search_graph(sample_graph, "process", kind="symbol")
         out = render_search_toon("process", [], symbols)
         assert "symbol_matches[" in out
-        assert "{name,type,file}" in out
+        assert "{name,type,file,signature,callers}" in out
 
     def test_omits_empty_section(self, sample_graph):
         # only file matches → no symbol_matches section
         files, _ = search_graph(sample_graph, "processor", kind="file")
         out = render_search_toon("processor", files, [])
         assert "symbol_matches" not in out
+
+
+# ---------------------------------------------------------------------------
+# Search hit enrichment (Phase 7.5c) — kills the search → query follow-up
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichedHits:
+    def test_file_hit_carries_exports_count(self, sample_graph):
+        files, _ = search_graph(sample_graph, "processor", kind="file")
+        # payments/processor.py defines PaymentProcessor + process → exports == 2
+        hit = next(f for f in files if f["path"] == "payments/processor.py")
+        assert hit["exports"] == 2
+
+    def test_file_hit_carries_imported_by_count(self, sample_graph):
+        files, _ = search_graph(sample_graph, "processor", kind="file")
+        # payments/processor.py is imported by api/views.py and orders/handler.py → 2
+        hit = next(f for f in files if f["path"] == "payments/processor.py")
+        assert hit["imported_by"] == 2
+
+    def test_symbol_hit_carries_signature(self, sample_graph):
+        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        assert symbols
+        assert symbols[0]["signature"] == "PaymentProcessor"
+
+    def test_symbol_hit_carries_callers_count(self, sample_graph):
+        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        # sample_graph has no `uses`/`calls` edges → callers == 0
+        assert symbols[0]["callers"] == 0
+
+    def test_signature_truncated_when_long(self):
+        from relic.search import _truncate_signature
+
+        long_sig = "fn(" + "x" * 200 + ") -> int"
+        out = _truncate_signature(long_sig)
+        assert len(out) <= 80
+        assert out.endswith("…")
+
+    def test_render_includes_signature_value(self, sample_graph):
+        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        out = render_search_toon("PaymentProcessor", [], symbols)
+        assert "PaymentProcessor,class,payments/processor.py,PaymentProcessor,0" in out
 
 
 # ---------------------------------------------------------------------------

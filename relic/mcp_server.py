@@ -1,11 +1,14 @@
 """MCP server — exposes relic knowledge graph as native tools for coding agents.
 
-Five tools:
+Four tools:
   relic_query   — dependency context for a file or symbol (call before editing)
   relic_search  — search symbols/files across the graph by name
-  relic_reindex — rebuild the knowledge graph after writing files
-  relic_stats   — index health: file count, symbol count, last updated
+  relic_reindex — incremental rebuild after writing files
   relic_diff    — what changed since last index (new/deleted/changed files)
+
+Every response is prefixed with an `index{age_s,stale,files_changed}` header
+so agents always know whether to call `relic_reindex` — there is no separate
+"stats" tool to call.
 
 Start with: relic mcp  (stdio transport, standard MCP protocol)
 
@@ -16,15 +19,15 @@ Configure in any MCP-compatible agent (.claude/settings.json, cursor settings, e
 """
 
 import asyncio
-import time
 from pathlib import Path
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from relic import freshness as _freshness
 from relic.diff import compute_diff, diff_to_toon
-from relic.indexer import compute_stats, load_graph, run_index
+from relic.indexer import incremental_index, load_graph
 from relic.search import (
     available_subprojects,
     render_search_toon,
@@ -109,7 +112,25 @@ def _load_or_error(knowledge_dir: Path):
     try:
         return load_graph(knowledge_dir), None
     except FileNotFoundError:
-        return None, "Error: no index found. Call relic_reindex first."
+        return None, (
+            "Error: no index found. Ask the user to run `relic index` "
+            "in the project root once; subsequent reindexes are incremental."
+        )
+
+
+def _config_path() -> Path | None:
+    return CONFIG_FILE if CONFIG_FILE.exists() else None
+
+
+def _freshness_header() -> str:
+    """Compute the current freshness header (cheap; cached for 2s)."""
+    f = _freshness.freshness(Path("."), KNOWLEDGE_DIR, _config_path())
+    return _freshness.header(f)
+
+
+def _wrap(text: str) -> list[TextContent]:
+    """Prefix the freshness header onto a response and box it as TextContent."""
+    return [TextContent(type="text", text=f"{_freshness_header()}\n{text}")]
 
 
 # ---------------------------------------------------------------------------
@@ -191,20 +212,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_reindex",
             description=(
-                "Rebuild the knowledge graph from source. Call after creating, "
-                "deleting, or moving files — stale queries return wrong context. "
-                "Returns file, symbol, and edge counts."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-        Tool(
-            name="relic_stats",
-            description=(
-                "Index health: files, symbols, edges, last_updated, subprojects. "
-                "Call before a large refactor; relic_reindex if last_updated is old."
+                "Incremental rebuild — reparses only files whose mtime changed "
+                "since the last index. Call when the response header reports "
+                "`stale=true`. Sub-second on large repos. If no index exists, "
+                "the user must run `relic index` once first."
             ),
             inputSchema={
                 "type": "object",
@@ -214,9 +225,9 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="relic_diff",
             description=(
-                "What changed since last index: new files, deleted files, changed "
-                "symbols. Call after merges or big edits to decide whether to "
-                "relic_reindex. Cheaper than a full reindex."
+                "Detail of what changed since last index: per-file new / deleted "
+                "/ modified, with symbol-level changes. Use when the header says "
+                "stale and you want to know what before reindexing."
             ),
             inputSchema={
                 "type": "object",
@@ -240,8 +251,6 @@ async def call_tool(name: str, arguments: dict | None) -> list[TextContent]:
         return _handle_search(args)
     if name == "relic_reindex":
         return await _handle_reindex()
-    if name == "relic_stats":
-        return _handle_stats()
     if name == "relic_diff":
         return _handle_diff()
     raise ValueError(f"Unknown tool: {name}")
@@ -285,31 +294,28 @@ def _handle_query(args: dict) -> list[TextContent]:
     max_neighbor_symbols: int = int(args.get("max_neighbor_symbols", 30))
 
     if not target:
-        return [TextContent(type="text", text="Error: target is required.")]
+        return _wrap("Error: target is required.")
 
     G, err = _load_or_error(KNOWLEDGE_DIR)
     if err:
-        return [TextContent(type="text", text=err)]
+        return _wrap(err)
 
     targets = target.split() if " " in target else [target]
 
     if len(targets) == 1:
-        return _query_single(
-            G, targets[0], depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols
+        return _wrap(
+            _query_single(G, targets[0], depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols)
         )
 
-    sections: list[str] = []
-    for t in targets:
-        result = _query_single(G, t, depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols)
-        sections.append(result[0].text)
-    return [TextContent(type="text", text="\n\n---\n\n".join(sections))]
+    sections = [
+        _query_single(G, t, depth, exclude_tests=exclude_tests, max_neighbor_symbols=max_neighbor_symbols)
+        for t in targets
+    ]
+    return _wrap("\n\n---\n\n".join(sections))
 
 
-def _query_single(
-    G, target: str, depth: int, *, exclude_tests: bool = False, max_neighbor_symbols: int = 0
-) -> list[TextContent]:
-    """Resolve and render a single target."""
-    # Try dotted notation first (ClassName.method, File.Symbol)
+def _query_single(G, target: str, depth: int, *, exclude_tests: bool = False, max_neighbor_symbols: int = 0) -> str:
+    """Resolve and render a single target as a TOON string (no header)."""
     matches = _resolve_dotted(G, target)
     if not matches:
         matches = _resolve_node(G, target)
@@ -320,32 +326,24 @@ def _query_single(
         if suggestions:
             msg += "\n\nDid you mean?\n  " + "\n  ".join(suggestions)
         msg += "\n\nUse relic_search to explore, or relic_reindex if the file was added recently."
-        return [TextContent(type="text", text=msg)]
+        return msg
 
     if len(matches) > 1:
         candidates = [G.nodes[n] for n in matches]
-        return [TextContent(type="text", text=candidates_to_toon(target, candidates))]
+        return candidates_to_toon(target, candidates)
 
     node_id = matches[0]
     subgraph = _bfs_subgraph(G, node_id, depth)
 
     node_data = G.nodes[node_id]
-    if node_data.get("ntype") == "symbol":
-        focus_path = node_data.get("path", node_id)
-    else:
-        focus_path = node_id
+    focus_path = node_data.get("path", node_id) if node_data.get("ntype") == "symbol" else node_id
 
-    return [
-        TextContent(
-            type="text",
-            text=_to_toon(
-                subgraph,
-                focus_path,
-                exclude_tests=exclude_tests,
-                max_neighbor_symbols=max_neighbor_symbols,
-            ),
-        )
-    ]
+    return _to_toon(
+        subgraph,
+        focus_path,
+        exclude_tests=exclude_tests,
+        max_neighbor_symbols=max_neighbor_symbols,
+    )
 
 
 def _handle_search(args: dict) -> list[TextContent]:
@@ -355,22 +353,17 @@ def _handle_search(args: dict) -> list[TextContent]:
     limit: int = int(args.get("limit", 20))
 
     if not query:
-        return [TextContent(type="text", text="Error: query is required.")]
+        return _wrap("Error: query is required.")
 
     G, err = _load_or_error(KNOWLEDGE_DIR)
     if err:
-        return [TextContent(type="text", text=err)]
+        return _wrap(err)
 
     if subproject:
         available = available_subprojects(G)
         if subproject not in available:
             avail_str = ", ".join(sorted(available)) or "(none indexed)"
-            return [
-                TextContent(
-                    type="text",
-                    text=f"Error: no such subproject '{subproject}'. Available: {avail_str}.",
-                )
-            ]
+            return _wrap(f"Error: no such subproject '{subproject}'. Available: {avail_str}.")
 
     file_matches, symbol_matches = search_graph(
         G,
@@ -379,65 +372,52 @@ def _handle_search(args: dict) -> list[TextContent]:
         subproject=subproject,
         limit=limit,  # type: ignore[arg-type]
     )
-    return [TextContent(type="text", text=render_search_toon(query, file_matches, symbol_matches))]
+    return _wrap(render_search_toon(query, file_matches, symbol_matches))
 
 
 async def _handle_reindex() -> list[TextContent]:
+    config = _config_path()
     try:
-        t0 = time.monotonic()
-        config = CONFIG_FILE if CONFIG_FILE.exists() else None
-        G, _ = await asyncio.to_thread(run_index, Path("."), KNOWLEDGE_DIR, config)
-        elapsed = time.monotonic() - t0
+        G, summary = await asyncio.to_thread(incremental_index, Path("."), KNOWLEDGE_DIR, config)
+    except FileNotFoundError:
+        return _wrap(
+            "Error: no index found. Ask the user to run `relic index` "
+            "in the project root once; subsequent reindexes are incremental."
+        )
     except Exception as exc:
-        return [TextContent(type="text", text=f"Reindex failed: {exc}")]
+        return _wrap(f"Reindex failed: {exc}")
+
+    # Reindex changed the on-disk state — drop the freshness cache so the
+    # header in this response (and the next call's) reflects reality.
+    _freshness.invalidate()
 
     file_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "file")
     symbol_count = sum(1 for _, d in G.nodes(data=True) if d.get("ntype") == "symbol")
     edge_count = G.number_of_edges()
 
-    return [
-        TextContent(
-            type="text",
-            text=(
-                f"reindex: done in {elapsed:.1f}s\nfiles: {file_count}\nsymbols: {symbol_count}\nedges: {edge_count}"
-            ),
-        )
-    ]
-
-
-def _handle_stats() -> list[TextContent]:
-    G, err = _load_or_error(KNOWLEDGE_DIR)
-    if err:
-        return [TextContent(type="text", text=err)]
-
-    stats = compute_stats(G, KNOWLEDGE_DIR)
-    lines = [
-        f"last_updated: {stats['last_updated']}",
-        f"files: {stats['files']}",
-        f"symbols: {stats['symbols']}",
-        f"edges: {stats['edges']}",
-    ]
-    for et, count in sorted(stats["edges_by_type"].items()):
-        lines.append(f"  {et}: {count}")
-    if stats["subprojects"]:
-        lines.append(f"subprojects: {', '.join(stats['subprojects'])}")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    body = (
+        f"reindex: incremental in {summary['elapsed_s']:.2f}s\n"
+        f"changed: +{summary['added']} new, ~{summary['modified']} modified, "
+        f"-{summary['deleted']} deleted, ={summary['unchanged']} unchanged\n"
+        f"files: {file_count}\nsymbols: {symbol_count}\nedges: {edge_count}"
+    )
+    return _wrap(body)
 
 
 def _handle_diff() -> list[TextContent]:
     if not KNOWLEDGE_DIR.exists():
-        return [TextContent(type="text", text="Error: no index found. Call relic_reindex first.")]
+        return _wrap(
+            "Error: no index found. Ask the user to run `relic index` "
+            "in the project root once; subsequent reindexes are incremental."
+        )
     try:
-        config = CONFIG_FILE if CONFIG_FILE.exists() else None
-        result = compute_diff(Path("."), KNOWLEDGE_DIR, config)
+        result = compute_diff(Path("."), KNOWLEDGE_DIR, _config_path())
     except Exception as exc:
-        return [TextContent(type="text", text=f"Error computing diff: {exc}")]
+        return _wrap(f"Error computing diff: {exc}")
 
     if not result["stale"]:
-        return [TextContent(type="text", text="status: up-to-date — no changes since last index")]
-
-    return [TextContent(type="text", text=diff_to_toon(result))]
+        return _wrap("status: up-to-date — no changes since last index")
+    return _wrap(diff_to_toon(result))
 
 
 # ---------------------------------------------------------------------------

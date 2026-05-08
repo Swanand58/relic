@@ -112,7 +112,107 @@ to 20+ languages, add tree-sitter as an optional dependency.
 | Release | Contains | Theme |
 |---------|----------|-------|
 | v0.4.0 | All of Phase 7 (7a–7d) | Token efficiency + graph richness |
-| v0.5.0 | Phase 8 features (see below) | Intelligence |
+| v0.5.0 | Phase 7.5 (workflow / save passes) | Fewer round-trips per task |
+| v0.6.0 | Phase 8 features (see below) | Intelligence |
+
+---
+
+## Phase 7.5 — Save the passes (agent workflow)
+
+Goal: collapse the typical 3–4 MCP round-trip pattern (`stats` → `search` → `query` → open
+file) into a **single `relic_query` call**. Driven by real agent feedback:
+
+- Agents ran `relic_stats` on every task to check freshness — pure overhead.
+- Agents that called `relic_reindex` on a large monorepo timed out every time
+  (full rebuild blocks the MCP request beyond the client's 30–60 s budget).
+- `relic_search` returned just names + paths, forcing an immediate `relic_query`
+  follow-up to get any usable context.
+- `relic_query` answered "what connects to what" but not "where does X happen",
+  so agents still had to grep + read files for logic-based tasks.
+
+Phase 7.5 fixes the surface without adding new MCP tools — every change either removes
+a tool, removes a round-trip, or enriches an existing response.
+
+### 7.5a — Remove `relic_stats` from the agent loop
+
+`relic_stats` answers one question agents actually care about: *is the index fresh?*
+That belongs in **every** response, not in a dedicated tool call.
+
+- **Embed an `index{...}` header on every MCP response** (`relic_query`, `relic_search`,
+  `relic_reindex`, `relic_diff`). Carries: `age_s`, `stale` (bool — derived from on-disk
+  mtimes vs. stored index mtime), `files_changed` count.
+- **Deprecate `relic_stats` as an MCP tool.** Keep `relic stats` CLI for humans.
+- Agent instructions updated: "Never call stats; freshness is in every response."
+- Net effect: ~1 wasted call per task eliminated.
+
+### 7.5b — Remove `relic watch`
+
+`relic watch` exists to keep the index fresh in the background. Once the agent itself
+can reindex cheaply (7.5d), the watcher is redundant — and it adds a separate process
+the user has to remember to start.
+
+- **Delete `relic watch` command and `relic/watcher.py`.**
+- Remove `watchdog` from `pyproject.toml` dependencies.
+- Remove related tests (`tests/test_watcher.py`).
+- Update README / agent rules to drop watcher references.
+- The agent owns freshness: it sees `stale=true` in the header → it calls
+  `relic_reindex` → incremental update finishes in < 1 s → it continues.
+
+### 7.5c — Enrich `relic_search` so most tasks need only one call
+
+Today `relic_search` returns name + path. Agents almost always follow up with
+`relic_query` to get the signature and neighbors. Fold that context into the search hit.
+
+- Each search hit gains: `signature`, one-line `docstring`, `neighbor_count`,
+  `defining_file` (if symbol).
+- Cost: ~30 tokens per hit, capped by `limit`.
+- Net effect: the `search → query` chain collapses to one call for the common case.
+
+### 7.5d — Incremental reindex (the timeout fix)
+
+Full `build_graph` is the only path today. It re-parses every file every time. On a
+large monorepo this blows past MCP client timeouts. No background jobs, no daemons —
+just **don't do work that doesn't need doing**.
+
+- **Stamp every file node with its `mtime` at index time.** Stored in a sidecar
+  `.knowledge/mtimes.json` (cheap to read without unpickling the full graph).
+- **`relic_reindex` becomes incremental by default**:
+  - Walk the tree, collect current mtimes (one stat per file — cheap).
+  - For each file: if `current_mtime <= stored_mtime`, **skip parsing entirely**.
+  - Reparse only changed/new files. Drop nodes for deleted files.
+  - Re-resolve cross-file edges (`uses`, `calls`, `extends`) for: touched files +
+    files that import them. Leave the rest of the graph alone.
+- **`stale=true` in the response header is computed the same way** — a single mtime
+  sweep tells both the agent (via header) and the reindexer (when invoked) what's dirty.
+- **Full rebuild stays available** as `relic index --full` (CLI) and as a
+  `mode="full"` arg on `relic_reindex` for the rare case the schema bumps or the index
+  gets corrupted. First-ever index on a fresh repo also goes through this path.
+- Concurrency: write to a temp file then atomic rename, so a half-finished reindex
+  can't corrupt the index for a parallel `relic_query`.
+- Net effect: a typical reindex on a 50k-file monorepo with a handful of changed files
+  drops from tens of seconds to sub-second. No MCP timeout. No background jobs needed.
+
+### 7.5e — `content=` on `relic_query` (folded later in 7.5)
+
+Last leg of "kill the read-the-file pass". Optional `content` parameter on
+`relic_query`: scoped string/regex match inside the focused file/symbol body, returned
+as `lineno: matching line` rows. Plus first-class indexing of decorators (e.g.
+`@app.route("/login")`) and one-line docstrings as symbol attributes, so they appear in
+the query response without bloating the default output.
+
+(Detailed design after 7.5a–d ship — wanted to record the direction.)
+
+### Round-trip ledger (target state)
+
+| Wasted call today | What kills it | Phase |
+|---|---|---|
+| `relic_stats` | Freshness header on every response | 7.5a |
+| Background `relic watch` process | Incremental reindex makes it pointless | 7.5b |
+| `relic_search` → `relic_query` | Search returns sig + docstring + neighbor count | 7.5c |
+| `relic_reindex` timeout / retry storm | Mtime-based incremental reindex | 7.5d |
+| `relic_query` → open file → grep | `content=` param + decorator/docstring index | 7.5e |
+
+Steady-state agent workflow: **one `relic_query` per question** in the common case.
 
 ---
 

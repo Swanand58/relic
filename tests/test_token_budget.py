@@ -71,4 +71,4 @@ class TestMcpBudget:
 
     def test_all_tools_present(self):
         names = {t.name for t in self._tools()}
-        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_stats", "relic_diff"}
+        assert names == {"relic_query", "relic_search", "relic_reindex", "relic_diff"}

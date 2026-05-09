@@ -139,6 +139,82 @@ def _extract_python_signature(node: ast.AST, source_lines: list[str]) -> str:
     return ""
 
 
+def _extract_python_intent(node: ast.AST) -> str:
+    """First line of docstring, max 80 chars. Empty if none."""
+    raw = ast.get_docstring(node) or ""
+    if not raw:
+        return ""
+    first = raw.split("\n")[0].strip()
+    return (first[:79] + "…") if len(first) > 79 else first
+
+
+_LITERAL_MIN_LEN = 8
+_LITERAL_MAX_LEN = 200
+_LITERALS_PER_SYMBOL = 20
+
+
+_RICH_MARKUP_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9 _]*\]")
+
+
+def _strip_markup(s: str) -> str:
+    """Strip Rich/ANSI markup tags like [bold red] or [/dim] from a string."""
+    return _RICH_MARKUP_RE.sub("", s).strip()
+
+
+def _extract_python_literals(node: ast.AST, docstring: str) -> list[dict]:
+    """String literals ≥8 chars inside a node body, skipping the docstring."""
+    seen: set[str] = set()
+    result: list[dict] = []
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Constant) or not isinstance(child.value, str):
+            continue
+        val = _strip_markup(child.value)
+        if len(val) < _LITERAL_MIN_LEN or val == docstring:
+            continue
+        truncated = (val[: _LITERAL_MAX_LEN - 1] + "…") if len(val) > _LITERAL_MAX_LEN else val
+        key = truncated[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append({"value": truncated, "line": getattr(child, "lineno", 0)})
+    result.sort(key=lambda x: len(x["value"]), reverse=True)
+    return result[:_LITERALS_PER_SYMBOL]
+
+
+def _extract_python_decorators(node: ast.AST) -> list[dict]:
+    """Decorators with literal args only. Max 5, most-recently-applied first."""
+    result: list[dict] = []
+    for dec in getattr(node, "decorator_list", []):
+        if isinstance(dec, ast.Name):
+            result.append({"name": dec.id, "args": []})
+        elif isinstance(dec, ast.Attribute):
+            try:
+                result.append({"name": ast.unparse(dec), "args": []})
+            except Exception:
+                pass
+        elif isinstance(dec, ast.Call):
+            name = ""
+            if isinstance(dec.func, ast.Name):
+                name = dec.func.id
+            elif isinstance(dec.func, ast.Attribute):
+                try:
+                    name = ast.unparse(dec.func)
+                except Exception:
+                    pass
+            if not name:
+                continue
+            args: list = []
+            for arg in dec.args:
+                if isinstance(arg, ast.Constant):
+                    args.append(arg.value)
+            for kw in dec.keywords:
+                if isinstance(kw.value, ast.Constant):
+                    args.append(kw.value.value)
+            result.append({"name": name, "args": args})
+    result.reverse()  # most-recently-applied first
+    return result[:5]
+
+
 def _extract_python_calls(func_node: ast.AST) -> list[str]:
     """Extract callee names from a function/method body.
 
@@ -213,11 +289,15 @@ def _analyse_python(
                 stype = "class"
             else:
                 stype = "function"
+            docstring = ast.get_docstring(node) or ""
             sym: dict = {
                 "name": node.name,
                 "stype": stype,
                 "line": node.lineno,
                 "signature": _extract_python_signature(node, source_lines),
+                "intent": _extract_python_intent(node),
+                "decorators": _extract_python_decorators(node),
+                "literals": _extract_python_literals(node, docstring),
             }
             if isinstance(node, ast.ClassDef) and node.bases:
                 for b in node.bases:
@@ -318,6 +398,54 @@ _TS_NAMED_IMPORT_RE = re.compile(
     re.VERBOSE,
 )
 
+_TS_DECORATOR_RE = re.compile(r"@([\w][\w.]*)\s*(?:\(([^)]*)\))?$")
+
+
+def _extract_ts_intent(lines: list[str], sym_line_1indexed: int) -> str:
+    """First stripped line of a JSDoc or // comment immediately before sym_line."""
+    idx = sym_line_1indexed - 2
+    if idx < 0:
+        return ""
+    line = lines[idx].strip()
+    if not line:
+        return ""
+    if line.startswith("//"):
+        text = line.lstrip("/ ").strip()
+        return (text[:79] + "…") if len(text) > 79 else text
+    if line == "*/" or line.endswith("*/"):
+        while idx >= 0:
+            ln = lines[idx].strip()
+            if ln.startswith("/**") or ln.startswith("/*"):
+                text = ln.lstrip("/*").rstrip("*/").strip()
+                if text and not text.startswith("@"):
+                    return (text[:79] + "…") if len(text) > 79 else text
+                break
+            text = ln.lstrip("* ").rstrip("*/").strip()
+            if text and not text.startswith("@"):
+                return (text[:79] + "…") if len(text) > 79 else text
+            idx -= 1
+    return ""
+
+
+def _extract_ts_decorators(lines: list[str], sym_line_1indexed: int) -> list[dict]:
+    """@decorator(literal_args) lines immediately before sym_line. Max 5."""
+    result: list[dict] = []
+    idx = sym_line_1indexed - 2
+    while idx >= 0:
+        line = lines[idx].strip()
+        m = _TS_DECORATOR_RE.match(line)
+        if m:
+            name = m.group(1)
+            args_str = m.group(2) or ""
+            args = [s.strip().strip("\"'") for s in re.findall(r"""['"][^'"]+['"]""", args_str)]
+            result.insert(0, {"name": name, "args": args})
+            idx -= 1
+        elif not line or line.startswith("//") or line.startswith("*"):
+            idx -= 1
+        else:
+            break
+    return result[:5]
+
 
 _TS_CALL_RE = re.compile(r"""\b(\w+)\s*\(""")
 
@@ -380,20 +508,63 @@ def _analyse_typescript(
         for m in _TS_CLASS_RE.finditer(line):
             name = m.group(1)
             sig = f"{name}({m.group(2)})" if m.group(2) else name
-            sym = {"name": name, "stype": "class", "line": i, "signature": sig}
+            sym = {
+                "name": name,
+                "stype": "class",
+                "line": i,
+                "signature": sig,
+                "intent": _extract_ts_intent(lines, i),
+                "decorators": _extract_ts_decorators(lines, i),
+            }
             if m.group(2):
                 sym["extends"] = m.group(2)
             symbols.append(sym)
         for m in _TS_FUNC_RE.finditer(line):
             sig = _ts_func_sig(stripped, m.group(1))
-            symbols.append({"name": m.group(1), "stype": "function", "line": i, "signature": sig})
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "function",
+                    "line": i,
+                    "signature": sig,
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_ARROW_RE.finditer(line):
             sig = _ts_func_sig(stripped, m.group(1))
-            symbols.append({"name": m.group(1), "stype": "function", "line": i, "signature": sig})
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "function",
+                    "line": i,
+                    "signature": sig,
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_IFACE_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "interface", "line": i, "signature": m.group(1)})
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "interface",
+                    "line": i,
+                    "signature": m.group(1),
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_TYPE_RE.finditer(line):
-            symbols.append({"name": m.group(1), "stype": "type", "line": i, "signature": m.group(1)})
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "type",
+                    "line": i,
+                    "signature": m.group(1),
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
 
     for pattern in (_TS_IMPORT_RE, _TS_REQUIRE_RE):
         for m in pattern.finditer(source):
@@ -783,6 +954,9 @@ def _apply_file_data(
             signature=sym.get("signature", ""),
             extends_name=sym.get("extends", ""),
             raw_calls=list(calls_by_caller.get(sym["name"], [])),
+            intent=sym.get("intent", ""),
+            decorators=sym.get("decorators", []),
+            literals=sym.get("literals", []),
         )
         G.add_edge(rel_path, sid, etype="defines")
 
@@ -844,6 +1018,22 @@ def _resolve_cross_file_edges(G: nx.DiGraph) -> None:
     _add_test_mapping(G)
 
 
+def _build_literal_index(G: nx.DiGraph) -> None:
+    """Build inverted string-literal index on G.graph['string_literals'].
+
+    Maps lowercase literal value → list of (original_value, symbol_id, line).
+    Used by quoted relic_search queries.
+    """
+    idx: dict[str, list[tuple[str, str, int]]] = {}
+    for n, d in G.nodes(data=True):
+        if d.get("ntype") != "symbol":
+            continue
+        for lit in d.get("literals", []):
+            key = lit["value"].lower()
+            idx.setdefault(key, []).append((lit["value"], n, lit.get("line", 0)))
+    G.graph["string_literals"] = idx
+
+
 def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx.DiGraph, dict]:
     """Build and return the full knowledge graph plus skip statistics.
 
@@ -861,6 +1051,7 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
         _apply_file_data(G, rel, lang, subproject, mtime, data)
 
     _resolve_cross_file_edges(G)
+    _build_literal_index(G)
     return G, skip_stats
 
 
@@ -1062,6 +1253,7 @@ def incremental_index(
 
     if touched or deleted:
         _resolve_cross_file_edges(G)
+        _build_literal_index(G)
         save_graph(G, knowledge_dir)
 
     # Always refresh the sidecar so it tracks what's actually on disk now,

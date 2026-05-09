@@ -8,11 +8,15 @@ manual file reads.
 
 ### Rules
 
-- MUST call `relic_query <path>` before any Edit, Write, or non-trivial Read on a file you have not already loaded in this session.
-- MUST call `relic_query <symbol>` before introducing a new import or call site for a symbol whose definition you have not seen.
-- MUST call `relic_reindex` whenever the response header reports `stale=true` (or after you create, delete, or move source files). Reindex is incremental and sub-second.
-- SHOULD call `relic_search <name>` instead of grep / file listings when you do not know where a class, function, or file lives.
-- DO NOT call any "stats" tool — every response carries an `index{age_s,stale,files_changed}` header. That is the only freshness signal you need.
+- MUST call `relic_query <path>` before edits when ANY of:
+    (a) the file has > 5 callers (check `imported_by` count in TOON output), OR
+    (b) the file is > 1,500 tokens (~6 KB) on disk — `cost{focus_file_tokens}` tells you, OR
+    (c) you have not loaded the file this session and the task is non-trivial.
+- MUST call `relic_reindex` whenever the response header reports `stale=true`, or after you create, delete, or move files. Reindex is incremental and sub-second.
+- SHOULD call `relic_query <symbol>` before introducing a new import or call site for a symbol whose definition you have not seen.
+- SHOULD call `relic_search <name>` instead of grep / file listings when you do not know where something lives.
+- SKIP `relic_query` for small, isolated files (< 200 tokens, 0 callers) you would read in full anyway.
+- DO NOT call any "stats" tool — every response carries `index{age_s,stale,files_changed}` and `cost{response_tokens,focus_file_tokens}` headers. No separate freshness check needed.
 
 ### Decision tree
 
@@ -47,9 +51,9 @@ neighbors[3]{path,language,subproject}:
   src/payments/models.py,python,payments
   src/core/database.py,python,core
 
-exports[5]{name,type,line}:
-  PaymentProcessor,class,12
-  process_payment,function,45
+exports[5]{name,type,line,signature,intent}:
+  PaymentProcessor,class,12,PaymentProcessor,Handles payment authorization and capture
+  process_payment,function,45,process_payment(order: Order) -> Receipt,Authorize card and emit receipt
 
 imports[2]{from,to}:
   src/payments/processor.py,src/payments/models.py

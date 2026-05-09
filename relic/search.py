@@ -126,31 +126,82 @@ def _symbol_callers(G: nx.DiGraph, sid: str) -> int:
     return sum(1 for _, _, ed in G.in_edges(sid, data=True) if ed.get("etype") in ("uses", "calls"))
 
 
+def _is_literal_query(query: str) -> bool:
+    return len(query) > 2 and query.startswith('"') and query.endswith('"')
+
+
+def _search_literals(G: nx.DiGraph, query: str, limit: int) -> list[dict]:
+    """Quoted search against the string literal inverted index."""
+    needle = query[1:-1].lower()
+    literal_index: dict = G.graph.get("string_literals", {})
+    results: list[dict] = []
+    for key, hits in literal_index.items():
+        if needle in key:
+            for orig_val, symbol_id, line in hits:
+                if symbol_id not in G.nodes:
+                    continue
+                d = G.nodes[symbol_id]
+                results.append(
+                    {
+                        "value": orig_val,
+                        "symbol": d.get("name", ""),
+                        "file": d.get("path", ""),
+                        "line": line,
+                    }
+                )
+    return results[:limit]
+
+
+def _score_symbol_with_decorators(d: dict, needle: str) -> tuple[int, str]:
+    """Return (best_score, via_hint) checking name and decorator names/args."""
+    score = _score(d.get("name", "").lower(), needle)
+    via = ""
+    for dec in d.get("decorators", []):
+        dec_score = _score(dec.get("name", "").lower(), needle)
+        if dec_score > score:
+            score = dec_score
+            via = f"@{dec['name']}"
+        for arg in dec.get("args", []):
+            arg_score = _score(str(arg).lower(), needle)
+            if arg_score > score:
+                score = arg_score
+                via = f"@{dec['name']}({arg})"
+    return score, via
+
+
 def search_graph(
     G: nx.DiGraph,
     query: str,
     kind: Kind = "all",
     subproject: str | None = None,
     limit: int = 20,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Run a scored substring search across file and symbol nodes.
 
-    Returns (file_matches, symbol_matches) ordered by score DESC then node
-    degree DESC, capped at `limit` per category.
+    Quoted queries (e.g. `'"rate limit exceeded"'`) search the string literal
+    inverted index and return literal_matches instead of symbol/file matches.
+
+    Returns (file_matches, symbol_matches, literal_matches) ordered by score
+    DESC then node degree DESC, capped at `limit` per category.
 
     `subproject`, if provided, restricts results to nodes belonging to that
     subproject. Symbol nodes inherit their defining file's subproject.
     """
-    needle = query.lower().strip()
-    if not needle:
-        return [], []
+    raw = query.strip()
+    if not raw:
+        return [], [], []
+
+    if _is_literal_query(raw):
+        return [], [], _search_literals(G, raw, limit)
+
+    needle = raw.lower()
 
     file_subproject: dict[str, str] = {
         n: d.get("subproject", "") for n, d in G.nodes(data=True) if d.get("ntype") == "file"
     }
 
     file_hits: list[tuple[int, int, dict]] = []
-    symbol_hits: list[tuple[int, int, dict]] = []
+    symbol_hits: list[tuple[int, int, dict, str]] = []
 
     for n, d in G.nodes(data=True):
         ntype = d.get("ntype")
@@ -164,9 +215,9 @@ def search_graph(
             sym_subproject = file_subproject.get(d.get("path", ""), "")
             if subproject and sym_subproject != subproject:
                 continue
-            score = _score(d.get("name", "").lower(), needle)
+            score, via = _score_symbol_with_decorators(d, needle)
             if score:
-                symbol_hits.append((score, G.degree(n), d))
+                symbol_hits.append((score, G.degree(n), d, via))
 
     file_hits.sort(key=lambda item: (-item[0], -item[1]))
     symbol_hits.sort(key=lambda item: (-item[0], -item[1]))
@@ -177,30 +228,34 @@ def search_graph(
         file_results.append({**d, "exports": exports, "imported_by": importers})
 
     symbol_results: list[dict] = []
-    for _, _, d in symbol_hits[:limit]:
+    for _, _, d, via in symbol_hits[:limit]:
         sid = f"{d.get('name', '')}@{d.get('path', '')}"
-        symbol_results.append(
-            {
-                **d,
-                "signature": _truncate_signature(d.get("signature", "")),
-                "callers": _symbol_callers(G, sid),
-            }
-        )
+        entry = {
+            **d,
+            "signature": _truncate_signature(d.get("signature", "")),
+            "callers": _symbol_callers(G, sid),
+            "intent": (d.get("intent", "") or "")[:80],
+        }
+        if via:
+            entry["via"] = via
+        symbol_results.append(entry)
 
-    return file_results, symbol_results
+    return file_results, symbol_results, []
 
 
 def render_search_toon(
     query: str,
     file_matches: list[dict],
     symbol_matches: list[dict],
+    literal_matches: list[dict] | None = None,
 ) -> str:
     """Render search results as a TOON document.
 
-    Returns a plain "No results" string when both lists are empty so callers
+    Returns a plain "No results" string when all lists are empty so callers
     can pass it straight through to stdout or an MCP TextContent.
     """
-    if not file_matches and not symbol_matches:
+    lm = literal_matches or []
+    if not file_matches and not symbol_matches and not lm:
         return f"No results for '{query}'."
 
     w = ToonWriter()
@@ -211,30 +266,40 @@ def render_search_toon(
             "file_matches",
             ["path", "language", "exports", "imported_by"],
             [
-                [
-                    d.get("path", ""),
-                    d.get("language", ""),
-                    d.get("exports", 0),
-                    d.get("imported_by", 0),
-                ]
+                [d.get("path", ""), d.get("language", ""), d.get("exports", 0), d.get("imported_by", 0)]
                 for d in file_matches
             ],
         ).blank()
 
     if symbol_matches:
+        has_via = any("via" in d for d in symbol_matches)
+        has_intent = any(d.get("intent") for d in symbol_matches)
+        fields = ["name", "type", "file", "signature", "callers"]
+        if has_intent:
+            fields.append("intent")
+        if has_via:
+            fields.append("via")
+        rows = []
+        for d in symbol_matches:
+            row = [
+                d.get("name", ""),
+                d.get("stype", ""),
+                d.get("path", ""),
+                d.get("signature", ""),
+                d.get("callers", 0),
+            ]
+            if has_intent:
+                row.append(d.get("intent", ""))
+            if has_via:
+                row.append(d.get("via", ""))
+            rows.append(row)
+        w.table("symbol_matches", fields, rows).blank()
+
+    if lm:
         w.table(
-            "symbol_matches",
-            ["name", "type", "file", "signature", "callers"],
-            [
-                [
-                    d.get("name", ""),
-                    d.get("stype", ""),
-                    d.get("path", ""),
-                    d.get("signature", ""),
-                    d.get("callers", 0),
-                ]
-                for d in symbol_matches
-            ],
+            "literal_matches",
+            ["value", "symbol", "file", "line"],
+            [[d.get("value", ""), d.get("symbol", ""), d.get("file", ""), d.get("line", 0)] for d in lm],
         ).blank()
 
     return w.build().strip()

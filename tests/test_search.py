@@ -43,48 +43,48 @@ class TestScore:
 
 class TestSearchGraph:
     def test_empty_query_returns_empty(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "")
+        files, symbols, _ = search_graph(sample_graph, "")
         assert files == []
         assert symbols == []
 
     def test_whitespace_query_returns_empty(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "   ")
+        files, symbols, _ = search_graph(sample_graph, "   ")
         assert files == []
         assert symbols == []
 
     def test_exact_symbol_match(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "PaymentProcessor")
+        _, symbols, __ = search_graph(sample_graph, "PaymentProcessor")
         names = [s["name"] for s in symbols]
         assert "PaymentProcessor" in names
 
     def test_substring_finds_partials(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "payment")
+        _, symbols, __ = search_graph(sample_graph, "payment")
         # case-insensitive — should hit PaymentProcessor
         assert any(s["name"] == "PaymentProcessor" for s in symbols)
 
     def test_kind_file_excludes_symbols(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "process", kind="file")
+        files, symbols, _ = search_graph(sample_graph, "process", kind="file")
         assert symbols == []
         # processor.py contains "process" substring
         assert any("processor" in f["path"] for f in files)
 
     def test_kind_symbol_excludes_files(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "process", kind="symbol")
+        files, symbols, _ = search_graph(sample_graph, "process", kind="symbol")
         assert files == []
         assert len(symbols) >= 1
 
     def test_kind_all_returns_both(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "process", kind="all")
+        files, symbols, _ = search_graph(sample_graph, "process", kind="all")
         assert files
         assert symbols
 
     def test_subproject_filter_files(self, sample_graph):
-        files, _ = search_graph(sample_graph, "processor", subproject="payments")
+        files, _, __ = search_graph(sample_graph, "processor", subproject="payments")
         assert files
         assert all(f["subproject"] == "payments" for f in files)
 
     def test_subproject_filter_symbols(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "process", subproject="orders")
+        _, symbols, __ = search_graph(sample_graph, "process", subproject="orders")
         # orders/handler.py defines `process` — its inherited subproject is `orders`
         assert symbols
         assert all(s["path"].startswith("orders/") for s in symbols)
@@ -92,28 +92,28 @@ class TestSearchGraph:
     def test_subproject_filter_excludes_other(self, sample_graph):
         # `Order` class only exists in payments/models.py — filtering by `orders`
         # subproject must not match it (despite the substring `Order`)
-        _, symbols = search_graph(sample_graph, "Order", subproject="orders")
+        _, symbols, __ = search_graph(sample_graph, "Order", subproject="orders")
         assert symbols == []
 
     def test_unknown_subproject_returns_empty(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "process", subproject="ghost")
+        files, symbols, _ = search_graph(sample_graph, "process", subproject="ghost")
         assert files == []
         assert symbols == []
 
     def test_ranking_exact_before_prefix_before_substring(self, sample_graph):
         # `process` matches symbols `process` (exact) twice and `PaymentProcessor` (substring).
         # The two exact-match `process` symbols must appear before PaymentProcessor.
-        _, symbols = search_graph(sample_graph, "process", kind="symbol")
+        _, symbols, __ = search_graph(sample_graph, "process", kind="symbol")
         names = [s["name"] for s in symbols]
         assert names.index("process") < names.index("PaymentProcessor")
 
     def test_limit_caps_results_per_category(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "p", kind="all", limit=1)
+        files, symbols, _ = search_graph(sample_graph, "p", kind="all", limit=1)
         assert len(files) <= 1
         assert len(symbols) <= 1
 
     def test_returns_node_data_dicts(self, sample_graph):
-        files, _ = search_graph(sample_graph, "processor")
+        files, _, __ = search_graph(sample_graph, "processor")
         assert files
         # callers rely on these keys
         for d in files:
@@ -133,25 +133,25 @@ class TestRenderSearchToon:
         assert out == "No results for 'ghost'."
 
     def test_renders_search_header(self, sample_graph):
-        files, symbols = search_graph(sample_graph, "processor")
+        files, symbols, _ = search_graph(sample_graph, "processor")
         out = render_search_toon("processor", files, symbols)
         assert out.startswith("search: processor")
 
     def test_includes_file_matches_table(self, sample_graph):
-        files, _ = search_graph(sample_graph, "processor", kind="file")
+        files, _, __ = search_graph(sample_graph, "processor", kind="file")
         out = render_search_toon("processor", files, [])
         assert "file_matches[" in out
         assert "{path,language,exports,imported_by}" in out
 
     def test_includes_symbol_matches_table(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "process", kind="symbol")
+        _, symbols, __ = search_graph(sample_graph, "process", kind="symbol")
         out = render_search_toon("process", [], symbols)
         assert "symbol_matches[" in out
         assert "{name,type,file,signature,callers}" in out
 
     def test_omits_empty_section(self, sample_graph):
         # only file matches → no symbol_matches section
-        files, _ = search_graph(sample_graph, "processor", kind="file")
+        files, _, __ = search_graph(sample_graph, "processor", kind="file")
         out = render_search_toon("processor", files, [])
         assert "symbol_matches" not in out
 
@@ -163,24 +163,24 @@ class TestRenderSearchToon:
 
 class TestEnrichedHits:
     def test_file_hit_carries_exports_count(self, sample_graph):
-        files, _ = search_graph(sample_graph, "processor", kind="file")
+        files, _, __ = search_graph(sample_graph, "processor", kind="file")
         # payments/processor.py defines PaymentProcessor + process → exports == 2
         hit = next(f for f in files if f["path"] == "payments/processor.py")
         assert hit["exports"] == 2
 
     def test_file_hit_carries_imported_by_count(self, sample_graph):
-        files, _ = search_graph(sample_graph, "processor", kind="file")
+        files, _, __ = search_graph(sample_graph, "processor", kind="file")
         # payments/processor.py is imported by api/views.py and orders/handler.py → 2
         hit = next(f for f in files if f["path"] == "payments/processor.py")
         assert hit["imported_by"] == 2
 
     def test_symbol_hit_carries_signature(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        _, symbols, __ = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
         assert symbols
         assert symbols[0]["signature"] == "PaymentProcessor"
 
     def test_symbol_hit_carries_callers_count(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        _, symbols, __ = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
         # sample_graph has no `uses`/`calls` edges → callers == 0
         assert symbols[0]["callers"] == 0
 
@@ -193,7 +193,7 @@ class TestEnrichedHits:
         assert out.endswith("…")
 
     def test_render_includes_signature_value(self, sample_graph):
-        _, symbols = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
+        _, symbols, __ = search_graph(sample_graph, "PaymentProcessor", kind="symbol")
         out = render_search_toon("PaymentProcessor", [], symbols)
         assert "PaymentProcessor,class,payments/processor.py,PaymentProcessor,0" in out
 

@@ -20,6 +20,7 @@ not you actually call it. Should stay well under 1,500 tokens.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from relic import style
@@ -245,6 +246,37 @@ def render_audit(audit: dict, console) -> None:
 
     console.print()
     _print_verdict(audit, console)
+
+
+def compute_usage_audit(knowledge_dir: Path) -> dict | None:
+    """Read MCP usage stats from .knowledge/usage.json. None if missing."""
+    usage_file = knowledge_dir / "usage.json"
+    if not usage_file.exists():
+        return None
+    try:
+        return json.loads(usage_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def render_usage_audit(usage: dict | None, console) -> None:
+    """Print MCP usage stats."""
+    console.print(style.header("audit --usage"))
+    console.print()
+    if usage is None:
+        console.print(style.dim("   no usage data — run relic via MCP first"))
+        console.print()
+        return
+    kw = 28
+    console.print(style.kv("queries", str(usage.get("query_count", 0)), key_width=kw))
+    console.print(style.kv("searches", str(usage.get("search_count", 0)), key_width=kw))
+    console.print(style.kv("reindexes", str(usage.get("reindex_count", 0)), key_width=kw))
+    console.print(style.kv("diffs", str(usage.get("diff_count", 0)), key_width=kw))
+    total = usage.get("total_response_tokens", 0)
+    console.print(style.kv("total response tokens", f"~{total:,}", key_width=kw))
+    tiny = usage.get("responses_under_200_tokens", 0)
+    console.print(style.kv("tiny responses (< 200 tok)", str(tiny), key_width=kw))
+    console.print()
 
 
 def _print_verdict(audit: dict, console) -> None:

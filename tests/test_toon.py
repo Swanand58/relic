@@ -161,7 +161,7 @@ class TestSubgraphToToon:
             define_edges=[],
             extends_edges=[],
         )
-        assert "exports[1]{name,type,line,signature}:" in out
+        assert "exports[1]{name,type,line,signature,intent}:" in out
         assert "Foo,class,1,Foo" in out
         assert "neighbor_symbols" in out
 

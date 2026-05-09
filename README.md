@@ -10,11 +10,13 @@ Every time an agent opens a file it reads that file, then the files it imports, 
 
 Relic builds a static knowledge graph from your source code in seconds (no LLM). Before the agent touches any file, it calls `relic_query` and gets:
 
-- What that file exports (symbol names, signatures, line numbers)
+- What that file exports (symbol names, signatures, line numbers, intent from docstrings)
 - What it imports (resolved paths, not guesses)
 - What else in the codebase depends on it (callers at the symbol level)
 - Which test file covers it
 - Class inheritance chains
+- Decorator/annotation index (search by `@pytest.mark.parametrize`, `@app.route`, etc.)
+- String literal index (search by quoting: `relic_search '"payment failed"'`)
 
 300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
@@ -40,11 +42,11 @@ neighbors[9]{path,language}:
   src/pagination/PaginationPlugin.ts,typescript
   ...
 
-exports[8]{name,type,line,signature}:
-  resolvePageSize,function,21,resolvePageSize(doc: PageDocument) -> number
-  resolveMargins,function,29,resolveMargins(config: MarginConfig) -> Margins
-  resolveHeader,function,38,resolveHeader(page: Page) -> HeaderBlock
-  FolioStorage,interface,67,FolioStorage
+exports[8]{name,type,line,signature,intent}:
+  resolvePageSize,function,21,resolvePageSize(doc: PageDocument) -> number,Compute the effective page size for a document
+  resolveMargins,function,29,resolveMargins(config: MarginConfig) -> Margins,Apply margin config to a page layout
+  resolveHeader,function,38,resolveHeader(page: Page) -> HeaderBlock,Build the header block for a page
+  FolioStorage,interface,67,FolioStorage,
   ...
 
 imports[8]{from,to}:
@@ -63,7 +65,7 @@ callers[2]{file,symbol}:
   src/render/engine.ts,resolveMargins
 ```
 
-Agent knows the structure — including signatures, test files, and callers — before reading the code. Fewer follow-up reads. No hallucinated imports. No surprise broken callers.
+Agent knows the structure — including signatures, intent, test files, and callers — before reading the code. Fewer follow-up reads. No hallucinated imports. No surprise broken callers.
 
 ---
 
@@ -165,13 +167,14 @@ Writes agent instructions and registers the relic MCP server in the right config
 ## MCP tools
 
 Relic exposes four tools over MCP (stdio transport). Every response is prefixed
-with an `index{age_s,stale,files_changed}` header so agents know when to reindex
-without a separate stats roundtrip.
+with an `index{age_s,stale,files_changed}` freshness header and a
+`cost{response_tokens,focus_file_tokens}` header so agents know when to reindex
+and can decide whether to skip a query on small files.
 
 | Tool | When to call |
 |---|---|
-| `relic_query` | Before editing unfamiliar code — returns imports, exports, signatures, neighbors, callers, calls, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`). Filters test symbols by default. |
-| `relic_search` | When you don't know where a class/function/file lives |
+| `relic_query` | Before editing unfamiliar code — returns imports, exports (with intent), signatures, neighbors, callers, calls, decorators, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`), `include_intent` toggle. |
+| `relic_search` | When you don't know where a class/function/file lives. Quote the query (`"error message"`) to search string literals inside function bodies. |
 | `relic_reindex` | When the response header reports `stale=true`, or after creating, editing, or deleting source files. Incremental, sub-second. |
 | `relic_diff` | When you want a per-file breakdown of what changed before reindexing |
 
@@ -197,9 +200,17 @@ Output is TOON (Token-Oriented Object Notation) — tabular format that declares
 
 The agent owns this. `relic_reindex` is **incremental** — it stat-sweeps the
 project tree, reparses only files whose mtime changed, and finishes in well under
-a second on large repos. Every MCP response carries an `index{...}` header that
-tells the agent whether `stale=true`, so there's no need for a separate
-"is the index fresh?" tool, no background watcher process, and no extra terminal tab.
+a second on large repos. Every MCP response carries two headers:
+
+```
+index{age_s,stale,files_changed}: 42,false,0
+cost{response_tokens,focus_file_tokens}: 847,312
+```
+
+`stale=true` means call `relic_reindex`. `cost{focus_file_tokens}` lets the agent
+decide whether a `relic_query` on a tiny file is worth the roundtrip — if it's
+under 200 tokens the agent can just read the file directly (SKIP rule). No
+background watcher process, no extra terminal tab, no separate stats tool.
 
 If you want to rebuild manually (after a big rebase or a tooling change), run
 `relic index` — same as before.
@@ -227,9 +238,10 @@ Compares on-disk source files against the last indexed graph. Shows new files, d
 
 ```bash
 relic audit
+relic audit --usage    # show MCP tool call counts from .knowledge/usage.json
 ```
 
-Shows three numbers: the instructions block written to `CLAUDE.md` / `.cursorrules` / `AGENTS.md`, the MCP tool schemas the agent loads every turn, and a sample `relic_query` against your real graph.
+Shows three numbers: the instructions block written to `CLAUDE.md` / `.cursorrules` / `AGENTS.md`, the MCP tool schemas the agent loads every turn, and a sample `relic_query` against your real graph. `--usage` adds a breakdown of how many times each MCP tool was called.
 
 ```
 ⬢  audit
@@ -283,6 +295,7 @@ relic query Class.method           # symbol-scoped query via dotted notation
 relic query "fileA fileB"          # batch query — merged TOON output
 relic query <file> --depth N       # adjust traversal depth (default 2)
 relic search <term>                # ranked search across files and symbols
+relic search '"literal text"'      # search string literals inside function bodies
 relic search <term> -k symbol      # filter to symbols (or `file`, `all`)
 relic search <term> -s <name>      # restrict to a subproject
 relic stats                        # index health: counts, last_updated, subprojects
@@ -290,6 +303,7 @@ relic diff                         # what changed since last index (new/deleted/
 relic coverage                     # what's indexed vs skipped, with reasons
 relic coverage -v                  # list every skipped file (not just samples)
 relic audit                        # measure relic's own token footprint
+relic audit --usage                # show per-tool MCP call counts
 relic benchmark <file>             # compare token cost of context with vs without relic
 relic mcp                          # start MCP stdio server (4 tools)
 
@@ -304,15 +318,15 @@ relic --version                    # print version
 
 ## What gets indexed
 
-| Language | Files | Symbols + Signatures | Imports | Calls | Inheritance | Test mapping |
-|---|---|---|---|---|---|---|
-| Python | ✓ | classes, functions (full signatures) | ✓ (ast) | ✓ (ast) | ✓ (`extends`) | ✓ (`test_foo.py`) |
-| TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ | ✓ (regex) | ✓ (`extends`) | ✓ (`foo.test.ts`) |
-| JavaScript / JSX | ✓ | classes, functions | ✓ | ✓ (regex) | ✓ | ✓ |
-| Go | ✓ | structs, interfaces, functions | ✓ | ✓ | — | — |
-| Rust | ✓ | structs, enums, traits, functions | ✓ | ✓ | ✓ (`impl`) | — |
-| Java | ✓ | classes, interfaces, methods | ✓ | ✓ | ✓ (`extends`) | — |
-| Other | ✓ (file nodes only) | — | — | — | — | — |
+| Language | Files | Symbols + Signatures | Intent | Decorators | Imports | Calls | Inheritance | Test mapping |
+|---|---|---|---|---|---|---|---|---|
+| Python | ✓ | classes, functions (full signatures) | ✓ (docstring) | ✓ (`@decorator`) | ✓ (ast) | ✓ (ast) | ✓ (`extends`) | ✓ (`test_foo.py`) |
+| TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ (leading comment) | ✓ (`@decorator`) | ✓ | ✓ (regex) | ✓ (`extends`) | ✓ (`foo.test.ts`) |
+| JavaScript / JSX | ✓ | classes, functions | ✓ (leading comment) | ✓ (`@decorator`) | ✓ | ✓ (regex) | ✓ | ✓ |
+| Go | ✓ | structs, interfaces, functions | ✓ (leading `//` comment) | — | ✓ | ✓ | — | — |
+| Rust | ✓ | structs, enums, traits, functions | ✓ (leading `///` comment) | ✓ (`#[attr]`) | ✓ | ✓ | ✓ (`impl`) | — |
+| Java | ✓ | classes, interfaces, methods | ✓ (Javadoc) | ✓ (`@Annotation`) | ✓ | ✓ | ✓ (`extends`) | — |
+| Other | ✓ (file nodes only) | — | — | — | — | — | — | — |
 
 Go, Rust, and Java support requires the optional `treesitter` extra:
 

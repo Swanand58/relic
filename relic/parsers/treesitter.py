@@ -12,9 +12,90 @@ Each parser walks the concrete syntax tree to extract:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from relic.parsers.base import AnalysisResult, register
+
+# ---------------------------------------------------------------------------
+# Shared source-text utilities (no tree-sitter dependency)
+# ---------------------------------------------------------------------------
+
+_RUST_ATTR_RE = re.compile(r"#\[(\w[\w:]*)\s*(?:\(([^)]*)\))?\]")
+_JAVA_ANNOT_RE = re.compile(r"@(\w+)\s*(?:\(([^)]*)\))?$")
+
+
+def _src_lines(source_bytes: bytes) -> list[str]:
+    return source_bytes.decode("utf-8", errors="replace").splitlines()
+
+
+def _leading_intent(src_lines: list[str], start_line_0indexed: int) -> str:
+    """First stripped line of a leading doc comment. Works for ///, //, /** */."""
+    idx = start_line_0indexed - 1
+    while idx >= 0 and not src_lines[idx].strip():
+        idx -= 1
+    if idx < 0:
+        return ""
+    line = src_lines[idx].strip()
+    if line.startswith("///"):
+        text = line[3:].strip()
+        return (text[:79] + "…") if len(text) > 79 else text
+    if line.startswith("//"):
+        text = line[2:].strip()
+        return (text[:79] + "…") if len(text) > 79 else text
+    if line == "*/" or line.endswith("*/"):
+        while idx >= 0:
+            ln = src_lines[idx].strip()
+            if ln.startswith("/**") or ln.startswith("/*"):
+                text = ln.lstrip("/*").rstrip("*/").strip()
+                if text and not text.startswith("@"):
+                    return (text[:79] + "…") if len(text) > 79 else text
+                break
+            text = ln.lstrip("* ").rstrip("*/").strip()
+            if text and not text.startswith("@"):
+                return (text[:79] + "…") if len(text) > 79 else text
+            idx -= 1
+    return ""
+
+
+def _leading_rust_attrs(src_lines: list[str], start_line_0indexed: int) -> list[dict]:
+    """#[attr(literal_args)] lines immediately before start_line. Max 5."""
+    result: list[dict] = []
+    idx = start_line_0indexed - 1
+    while idx >= 0:
+        line = src_lines[idx].strip()
+        m = _RUST_ATTR_RE.match(line)
+        if m:
+            name = m.group(1)
+            args_str = m.group(2) or ""
+            args = [a.strip().strip("\"'") for a in re.findall(r"""['"][^'"]+['"]""", args_str)]
+            result.insert(0, {"name": name, "args": args})
+            idx -= 1
+        elif not line or line.startswith("//"):
+            idx -= 1
+        else:
+            break
+    return result[:5]
+
+
+def _leading_java_annotations(src_lines: list[str], start_line_0indexed: int) -> list[dict]:
+    """@Annotation(literal_args) lines immediately before start_line. Max 5."""
+    result: list[dict] = []
+    idx = start_line_0indexed - 1
+    while idx >= 0:
+        line = src_lines[idx].strip()
+        m = _JAVA_ANNOT_RE.match(line)
+        if m:
+            name = m.group(1)
+            args_str = m.group(2) or ""
+            args = [lit for lit in re.findall(r'"([^"]+)"', args_str)]
+            result.insert(0, {"name": name, "args": args})
+            idx -= 1
+        elif not line or line.startswith("//") or line.startswith("*") or line == "*/":
+            idx -= 1
+        else:
+            break
+    return result[:5]
 
 
 def _node_text(node, source_bytes: bytes) -> str:
@@ -36,6 +117,7 @@ class GoParser:
         src = source.encode("utf-8")
         tree = parser.parse(src)
         root = tree.root_node
+        lines = _src_lines(src)
 
         result = AnalysisResult()
         func_names: set[str] = set()
@@ -46,8 +128,16 @@ class GoParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     params = _go_func_sig(node, src, name)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "function", "line": node.start_point[0] + 1, "signature": params}
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": params,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
                     )
                     func_names.add(name)
 
@@ -56,8 +146,16 @@ class GoParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     params = _go_func_sig(node, src, name)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "function", "line": node.start_point[0] + 1, "signature": params}
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": params,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
                     )
                     func_names.add(name)
 
@@ -70,8 +168,16 @@ class GoParser:
                         stype = "class"
                         if type_node and type_node.type == "interface_type":
                             stype = "interface"
+                        ln = spec.start_point[0]
                         result.symbols.append(
-                            {"name": name, "stype": stype, "line": spec.start_point[0] + 1, "signature": name}
+                            {
+                                "name": name,
+                                "stype": stype,
+                                "line": ln + 1,
+                                "signature": name,
+                                "intent": _leading_intent(lines, ln),
+                                "decorators": [],
+                            }
                         )
 
             elif node.type == "import_declaration":
@@ -127,6 +233,7 @@ class RustParser:
         src = source.encode("utf-8")
         tree = parser.parse(src)
         root = tree.root_node
+        lines = _src_lines(src)
 
         result = AnalysisResult()
         func_names: set[str] = set()
@@ -137,8 +244,16 @@ class RustParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     sig = _rust_func_sig(node, src, name)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "function", "line": node.start_point[0] + 1, "signature": sig}
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": sig,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
                     )
                     func_names.add(name)
 
@@ -146,24 +261,48 @@ class RustParser:
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "class", "line": node.start_point[0] + 1, "signature": name}
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
                     )
 
             elif node.type == "enum_item":
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "class", "line": node.start_point[0] + 1, "signature": name}
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
                     )
 
             elif node.type == "trait_item":
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "interface", "line": node.start_point[0] + 1, "signature": name}
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
                     )
 
             elif node.type == "impl_item":
@@ -172,13 +311,16 @@ class RustParser:
                 if trait_node and type_node:
                     impl_name = _node_text(type_node, src)
                     trait_name = _node_text(trait_node, src)
+                    ln = node.start_point[0]
                     result.symbols.append(
                         {
                             "name": impl_name,
                             "stype": "class",
-                            "line": node.start_point[0] + 1,
+                            "line": ln + 1,
                             "signature": f"{impl_name}({trait_name})",
                             "extends": trait_name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
                         }
                     )
 
@@ -233,6 +375,7 @@ class JavaParser:
         src = source.encode("utf-8")
         tree = parser.parse(src)
         root = tree.root_node
+        lines = _src_lines(src)
 
         result = AnalysisResult()
         method_names: set[str] = set()
@@ -243,12 +386,14 @@ class JavaParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     superclass = node.child_by_field_name("superclass")
-                    sig = name
+                    ln = node.start_point[0]
                     sym: dict = {
                         "name": name,
                         "stype": "class",
-                        "line": node.start_point[0] + 1,
-                        "signature": sig,
+                        "line": ln + 1,
+                        "signature": name,
+                        "intent": _leading_intent(lines, ln),
+                        "decorators": _leading_java_annotations(lines, ln),
                     }
                     if superclass:
                         parent = _node_text(superclass, src)
@@ -260,8 +405,16 @@ class JavaParser:
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "interface", "line": node.start_point[0] + 1, "signature": name}
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
                     )
 
             elif node.type == "method_declaration":
@@ -269,8 +422,16 @@ class JavaParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     sig = _java_method_sig(node, src, name)
+                    ln = node.start_point[0]
                     result.symbols.append(
-                        {"name": name, "stype": "function", "line": node.start_point[0] + 1, "signature": sig}
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": sig,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
                     )
                     method_names.add(name)
 

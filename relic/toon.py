@@ -93,6 +93,7 @@ def subgraph_to_toon(
     calls_edges: list[tuple[str, str]] | None = None,
     exclude_tests: bool = False,
     max_neighbor_symbols: int = 0,
+    include_intent: bool = True,
 ) -> str:
     """Render a knowledge graph subgraph as a TOON document.
 
@@ -120,11 +121,30 @@ def subgraph_to_toon(
 
     focus_symbols = [s for s in symbol_nodes if s["path"] == focus_path]
     if focus_symbols:
-        w.table(
-            "exports",
-            ["name", "type", "line", "signature"],
-            [[s["name"], s["stype"], s["line"], s.get("signature", "")] for s in focus_symbols],
-        ).blank()
+        if include_intent:
+            w.table(
+                "exports",
+                ["name", "type", "line", "signature", "intent"],
+                [
+                    [s["name"], s["stype"], s["line"], s.get("signature", ""), s.get("intent", "")]
+                    for s in focus_symbols
+                ],
+            ).blank()
+        else:
+            w.table(
+                "exports",
+                ["name", "type", "line", "signature"],
+                [[s["name"], s["stype"], s["line"], s.get("signature", "")] for s in focus_symbols],
+            ).blank()
+
+    if include_intent:
+        dec_rows: list[list] = []
+        for s in focus_symbols:
+            for dec in s.get("decorators", []):
+                args_repr = str(dec.get("args", []))
+                dec_rows.append([s["name"], dec["name"], args_repr])
+        if dec_rows:
+            w.table("decorators", ["symbol", "decorator", "args"], dec_rows).blank()
 
     neighbor_symbols = [s for s in symbol_nodes if s["path"] != focus_path]
     if exclude_tests:

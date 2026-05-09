@@ -15,7 +15,7 @@ import yaml
 
 from relic import __version__, style
 from relic.agent_config import AGENTS, init_agent, init_all_agents
-from relic.audit import compute_audit, render_audit
+from relic.audit import compute_audit, compute_usage_audit, render_audit, render_usage_audit
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
 from relic.diff import compute_diff, diff_to_toon
@@ -255,7 +255,7 @@ def search_cmd(
             console.print(style.error(f"no such subproject {subproject!r}. available: {avail_str}."))
             raise SystemExit(1)
 
-    file_matches, symbol_matches = search_graph(
+    file_matches, symbol_matches, literal_matches = search_graph(
         G,
         query,
         kind=kind,
@@ -263,7 +263,7 @@ def search_cmd(
         limit=limit,  # type: ignore[arg-type]
     )
 
-    print(render_search_toon(query, file_matches, symbol_matches))
+    print(render_search_toon(query, file_matches, symbol_matches, literal_matches))
 
     suffix = f" {style.DOT} subproject={subproject}" if subproject else ""
     err_console.print(
@@ -329,7 +329,9 @@ def mcp_cmd() -> None:
 
 
 @app.command(name="audit")
-def audit_cmd() -> None:
+def audit_cmd(
+    usage: bool = typer.Option(False, "--usage", help="Show MCP call usage stats instead of token footprint."),
+) -> None:
     """Measure relic's own token footprint in the agent context.
 
     Shows the instruction block written to CLAUDE.md / .cursorrules,
@@ -337,7 +339,12 @@ def audit_cmd() -> None:
     relic_query against your real graph. Use this to verify relic isn't
     itself part of the 73% overhead problem documented for AI coding
     agents — the baseline tax should stay well under 1,500 tokens.
+
+    Pass --usage to show MCP call counts and response token totals instead.
     """
+    if usage:
+        render_usage_audit(compute_usage_audit(KNOWLEDGE_DIR), console)
+        return
     audit = compute_audit(PROJECT_ROOT, KNOWLEDGE_DIR)
     render_audit(audit, console)
 

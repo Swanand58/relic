@@ -25,6 +25,7 @@
 | v0.3.0 — Zero-config indexing | `feat/v0.3.0-zero-config` | `relic init` scans entire project tree. `relic.yaml` optional. Removed `discovery.py`. |
 | Enhanced `relic index` | `feat/enhance-relic-index` | `.relicignore` support, skip stats, delta summary. |
 | Zero-config all commands | `fix/yaml-optional-everywhere` | `relic diff`, `relic watch`, `relic coverage`, `relic --list` no longer require `relic.yaml`. |
+| Phase 8 — Semantic Index (incl. 7d tree-sitter) | `feat/phase8-semantic-index` | `intent` (docstrings/leading comments) on every symbol for Python/TS/Go/Rust/Java. `decorators` (literal args only, max 5) on Python/TS/Go/Rust/Java symbols. String literal index (≥8 chars, max 20/symbol) + quoted `relic_search '"..."'`. `cost{response_tokens,focus_file_tokens}` header on every MCP response. Tiered MUST/SHOULD/SKIP rules in RELIC_INSTRUCTIONS. `relic audit --usage`. 50 new tests (311 total). |
 
 ---
 
@@ -113,7 +114,8 @@ to 20+ languages, add tree-sitter as an optional dependency.
 |---------|----------|-------|
 | v0.4.0 | All of Phase 7 (7a–7d) | Token efficiency + graph richness |
 | v0.5.0 | Phase 7.5 (workflow / save passes) | Fewer round-trips per task |
-| v0.6.0 | Phase 8 features (see below) | Intelligence |
+| v0.6.0 | Phase 8 (semantic index) | Agent skips file reads |
+| v0.7.0+ | Phase 9 (intelligence + remaining languages) | Breadth + advanced graph features |
 
 ---
 
@@ -192,16 +194,6 @@ just **don't do work that doesn't need doing**.
 - Net effect: a typical reindex on a 50k-file monorepo with a handful of changed files
   drops from tens of seconds to sub-second. No MCP timeout. No background jobs needed.
 
-### 7.5e — `content=` on `relic_query` (folded later in 7.5)
-
-Last leg of "kill the read-the-file pass". Optional `content` parameter on
-`relic_query`: scoped string/regex match inside the focused file/symbol body, returned
-as `lineno: matching line` rows. Plus first-class indexing of decorators (e.g.
-`@app.route("/login")`) and one-line docstrings as symbol attributes, so they appear in
-the query response without bloating the default output.
-
-(Detailed design after 7.5a–d ship — wanted to record the direction.)
-
 ### Round-trip ledger (target state)
 
 | Wasted call today | What kills it | Phase |
@@ -210,38 +202,266 @@ the query response without bloating the default output.
 | Background `relic watch` process | Incremental reindex makes it pointless | 7.5b |
 | `relic_search` → `relic_query` | Search returns sig + docstring + neighbor count | 7.5c |
 | `relic_reindex` timeout / retry storm | Mtime-based incremental reindex | 7.5d |
-| `relic_query` → open file → grep | `content=` param + decorator/docstring index | 7.5e |
+| `relic_query` → open file → grep | Semantic index (Phase 8) | 8 |
 
 Steady-state agent workflow: **one `relic_query` per question** in the common case.
 
+(`7.5e` — `content=` parameter and decorator/docstring indexing — has been folded
+into Phase 8, where it belongs alongside the broader semantic-index work.)
+
 ---
 
-## Phase 8 — Intelligence + Remaining Languages
+## Phase 8 — Semantic Index
 
-Features moved here from the original roadmap. Will be planned in detail after Phase 7.
+Goal: collapse the three remaining "logic discovery" failure modes into single relic
+calls, so the agent stops grepping and stops reading whole files just to figure out
+*what code does*. Driven by the same agent feedback as Phase 7.5:
 
-### 8a — Intelligence
+- `relic_query` tells me **what connects to what**, but not **what it does**. So I
+  read the file anyway just to see whether `process_payment` validates, charges, or
+  also sends an email. One docstring would have answered it.
+- "Where is the login route defined?" still requires `grep "@app.route"` + opening
+  matches to find the right path. The decorator + literal arg is sitting right there
+  in the AST — relic just doesn't index it.
+- "Where does this error message come from?" forces a grep across the repo, then a
+  read to figure out the enclosing function. String literals scoped to their symbol
+  would answer this in one call.
 
-**8a.1: Community detection (lightweight, no LLM)**
+Phase 8 stays inside the existing constraints: no LLM, no new MCP tools, all signals
+extracted by static analysis, token budgets enforced. Old Phase 8 (Louvain, `relic
+explain`/`path`, more languages, `relic viz`) moves to **Phase 9**.
+
+### 8a — Docstrings / leading comments per symbol (intent surface)
+
+Single biggest win-per-byte. *Every* query benefits, on every symbol.
+
+**What gets indexed**
+
+- Python: `ast.get_docstring(node)` for class / function / async function. **First
+  line only.**
+- TS/JS: regex for the `/** … */` JSDoc block or contiguous `//` lines directly
+  preceding a `function` / `class` / `const` declaration. First line of stripped
+  comment text.
+- Tree-sitter languages (Go, Rust, Java): same first-line rule via the parser's
+  comment node (`//`, `///`, `/* */`, doc-comment grammar nodes).
+
+**Where it lives**
+
+- New `intent` attribute on every symbol node. String, max **80 chars**, `…`-truncated.
+  Empty string when there is no docstring/leading comment.
+
+**Where it surfaces**
+
+- `relic_query`: `exports[]{name,type,line,signature,intent}` — column added to the
+  existing exports table. **Default on.**
+- `relic_search`: `symbol_matches[]{name,type,file,signature,callers,intent}` — adds
+  `intent` to the row introduced in 7.5c.
+- Off via `include_intent=false` on `relic_query` for token-sensitive callers.
+
+**Token budget**
+
+- ≤ 80 chars × ~30 symbols default cap → ~600 chars per query → ~150 added tokens.
+  < 5% of a typical query response. Net win as soon as it kills one file read.
+
+**Tests**
+
+- Python `def f(): """Compute X."""` → `intent == "Compute X."`.
+- Python no docstring → `intent == ""`.
+- TS JSDoc block → first stripped line surfaces.
+- Truncation at 80 chars produces a trailing `…`.
+- `include_intent=false` removes the column from `exports`.
+- Token-budget regression tests still pass.
+
+### 8b — Decorator / annotation literal index
+
+Cheap, targeted, kills `grep "@app.route"`-style searches across all web/CLI/ORM/
+job-queue codebases.
+
+**What gets indexed**
+
+- Python: every `@decorator` on a function/class. Capture `name` (dotted) and
+  *literal* args only (string / number / bool / `None`). **Drop non-literal args**
+  silently — we never want to index `@retry(BACKOFF_MS)` because the value isn't
+  knowable statically.
+- TS/JS: regex for `@decorator(...)` immediately preceding `class`/`function`/method.
+  Same literal-only rule.
+- Tree-sitter languages (Java annotations, Rust attributes, Go directive comments
+  where applicable): walk annotation nodes, extract literal args.
+
+**Where it lives**
+
+- New `decorators` attribute on symbol nodes: list of `{name, args}` dicts. Hard cap
+  of **5 entries per symbol** (most-recently-applied first when truncated).
+
+**Where it surfaces**
+
+- `relic_query`: new optional TOON section `decorators[N]{symbol,decorator,args}` —
+  emitted **only when** at least one focus-file symbol has decorators. Zero cost on
+  files that use none.
+- `relic_search`: search query is matched against decorator names AND literal arg
+  values. `relic_search "/login"` finds `@app.route("/login")`. The hit row gains a
+  short `via` annotation indicating the match came from a decorator.
+
+**Token budget**
+
+- Most symbols have no decorators. Files with heavy decorator usage (Flask, Typer,
+  Pydantic) gain ~5–15 tokens per decorated symbol. Negligible vs. file reads
+  killed.
+
+**Tests**
+
+- `@app.route("/login")` → `{"name":"app.route","args":["/login"]}`.
+- `@cached` → `{"name":"cached","args":[]}`.
+- `@retry(BACKOFF_MS)` → `{"name":"retry","args":[]}` (non-literal silently dropped).
+- TS `@Component({selector: 'app-foo'})` → name + literal `selector` value captured.
+- `relic_search "/login"` returns the decorated symbol with `via: @app.route`.
+- Per-symbol cap of 5 enforced.
+
+### 8c — Symbol-scoped string literal index
+
+Targets the "where does this error message come from?" failure mode.
+
+**What gets indexed**
+
+- All string literals **≥ 8 characters** inside function/method/class bodies. Stored
+  as `{value, line, symbol_id}` per literal.
+- Hard caps: max **20 literals per symbol** (longest first when truncated); never
+  store > **200 chars** per literal value (truncate with `…`).
+- **Skip** docstring strings — they're already captured by 8a.
+- For f-strings / template literals, capture only the **constant prefix** (everything
+  before the first interpolation). Avoids storing partial junk.
+
+**Where it lives**
+
+- Per-symbol `literals` attribute on symbol nodes (not surfaced in `relic_query`
+  output by default — too noisy).
+- Aggregate inverted index `string_literals: {value → [symbol_ids]}` stored on the
+  graph, used by quoted search.
+
+**Where it surfaces**
+
+- `relic_search` recognizes a **quoted** query as a literal search:
+  `relic_search '"rate limit exceeded"'` → returns matching symbols with file +
+  line + signature + a 30-char snippet around the match.
+- TOON section: `literal_matches[N]{value,symbol,file,line}`. Bounded by `limit`
+  (default 20).
+- Unquoted searches keep behaving as today (name-based ranking).
+
+**Token budget**
+
+- Aggregate index lives in the pickle, **not in any response**.
+- Per-search response is bounded by `limit`. ~25 tokens per hit × 20 = ~500 tokens
+  worst case.
+
+**Tests**
+
+- `raise ValueError("rate limit exceeded")` → indexed under enclosing function.
+- Quoted search returns enclosing symbol + line.
+- Unquoted search behaves as in 7.5c.
+- Literals < 8 chars not indexed.
+- Literals > 200 chars truncated.
+- f-string prefix captured; interpolation parts dropped.
+- Per-symbol cap of 20 enforced.
+
+### 8d — Productivity instrumentation
+
+So we can prove (or disprove) that 8a–8c actually help, instead of guessing.
+
+**Cost hints in every MCP response**
+
+Extend the freshness header from 7.5a into a two-line preface:
+
+```
+index{age_s,stale,files_changed}: 0,false,0
+cost{response_tokens,focus_file_tokens}: 412,1830
+```
+
+`focus_file_tokens` is a rough estimate from the on-disk size of the focus file
+(bytes ÷ 4). Lets the agent compare "what relic gave me" against "what reading the
+file would cost", so it can throttle itself honestly. Adds ~10 tokens per response.
+
+**Tiered rules in `RELIC_INSTRUCTIONS`**
+
+Replace the blanket MUST with a context-aware one:
+
+```
+- MUST call `relic_query <path>` before edits when:
+    (a) the file has > 5 callers (high blast radius), OR
+    (b) the file is > 1500 tokens (cheaper than reading), OR
+    (c) you have not loaded the file in this session and the task is non-trivial.
+- SHOULD call `relic_query <symbol>` when introducing a new import or call site.
+- SHOULD skip `relic_query` for known small files where you'd read the whole file
+  anyway.
+```
+
+This explicitly removes the "spend 300 tokens to confirm a 200-token file" anti-
+pattern the user flagged.
+
+**`relic audit --usage`**
+
+New flag on the existing audit command. Reads an in-memory MCP call counter (server
+tracks `query_count`, `search_count`, `responses_under_200_tokens`, average size,
+distribution of stale headers) and reports a per-session summary. We can't observe
+post-relic file reads in an agent-agnostic way, so we measure what we *can* and
+explicitly flag the rest as unknown.
+
+**Token budget**
+
+- Cost line: ~10 tokens per response.
+- Tiered rules might *shrink* `RELIC_INSTRUCTIONS` net.
+- `--usage` is CLI-only; zero MCP cost.
+
+### Order of work inside Phase 8
+
+1. **8d first** (instrumentation). Cheap. Gives us measurement before we add signal.
+2. **8a** (docstrings). Highest value-per-byte.
+3. **8b** (decorators). Cheap, additive.
+4. **8c** (string literals). Largest payoff for "where does this come from" tasks.
+
+### What we are explicitly *not* doing in Phase 8
+
+- **Effects fingerprint** ("does this hit the network/DB/filesystem?"). Doing it
+  shallowly is misleading; doing it deeply requires whole-graph call closure and is
+  easy to ship wrong. Defer to Phase 9.
+- **Raises index** as a standalone feature. If it falls out cheaply during 8a's AST
+  walk, fine — otherwise Phase 9.
+- **Type-flow analysis.** Out of scope.
+- **Anything requiring runtime data.** Out of scope.
+
+---
+
+## Phase 9 — Intelligence + Remaining Languages
+
+The original Phase 8 roadmap, deferred so Phase 8 can focus on the semantic index.
+
+### 9a — Intelligence
+
+**9a.1: Community detection (lightweight, no LLM)**
 
 Use NetworkX built-in `louvain_communities` to assign a `community` attribute to each
 file node. Surface in TOON output. New CLI command: `relic communities`.
 
-**8a.2: `relic explain <symbol>`** — signature, callers, callees, community, test files
+**9a.2: `relic explain <symbol>`** — signature, callers, callees, community, test
+files. Becomes the single human-facing surface for *all* the semantic data 8a–8c
+indexed.
 
-**8a.3: `relic path <A> <B>`** — shortest dependency path between two symbols/files
+**9a.3: `relic path <A> <B>`** — shortest dependency path between two symbols/files.
 
-**8a.4: Graph diff improvements** — calls edges, community shifts, impact radius
+**9a.4: Graph diff improvements** — calls edges, community shifts, impact radius.
 
-### 8b — Languages batch 2
+**9a.5: Effects fingerprint** (deferred from Phase 8) — done with transitive
+call-graph closure so "does X hit the DB?" is correct, not just "does X *directly*
+hit the DB?".
 
-C#, Kotlin, Scala, PHP, Swift, Lua
+### 9b — Languages batch 2
 
-### 8c — Languages batch 3
+C#, Kotlin, Scala, PHP, Swift, Lua.
 
-Zig, Elixir, Objective-C, Julia, SQL, Fortran
+### 9c — Languages batch 3
 
-### 8d — Visualization
+Zig, Elixir, Objective-C, Julia, SQL, Fortran.
+
+### 9d — Visualization
 
 **`relic viz`** — Generate interactive HTML graph (D3.js or vis.js, single file, zero
 Python deps). `relic viz` opens in default browser.

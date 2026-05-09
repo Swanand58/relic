@@ -41,10 +41,10 @@ class TestInstructionsContent:
 
     def test_must_rules_present(self):
         assert "MUST call `relic_query <path>`" in RELIC_INSTRUCTIONS
-        assert "MUST call `relic_query <symbol>`" in RELIC_INSTRUCTIONS
         assert "MUST call `relic_reindex`" in RELIC_INSTRUCTIONS
 
     def test_should_rules_present(self):
+        assert "SHOULD call `relic_query <symbol>`" in RELIC_INSTRUCTIONS
         assert "SHOULD call `relic_search" in RELIC_INSTRUCTIONS
 
     def test_no_stats_rule_present(self):

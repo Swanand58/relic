@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added (Phase 8 — Semantic Index)
+
+- **Symbol intent**: first line of docstring or leading comment per symbol stored
+  as an `intent` field (max 80 chars). Visible in `relic_query` exports table
+  (`exports[N]{name,type,line,signature,intent}`) and `relic_search` results.
+- **Decorator index**: decorator names and literal arguments indexed per symbol
+  (max 5). Surfaces in `relic_query` as a `decorators[N]{symbol,decorator,args}`
+  table. Decorator-matched search results show `via=decorator:<name>`.
+- **String literal index**: string constants ≥ 8 chars inside function bodies
+  indexed in an inverted lookup (max 20 per symbol, max 200 chars each). Search
+  by quoting the query: `relic_search '"payment failed"'`. Results in
+  `literal_matches[N]{value,symbol,file,line}` table.
+- **Cost header**: every MCP response now emits a second header line
+  `cost{response_tokens,focus_file_tokens}`. Agents use `focus_file_tokens` to
+  apply the SKIP rule without an extra roundtrip.
+- **Tiered agent rules**: MUST/SHOULD/SKIP tiers replace the flat MUST list.
+  `relic_query` is skippable for small isolated files (< 200 tokens, 0 callers).
+  `relic_query <symbol>` demoted from MUST to SHOULD.
+- **`relic audit --usage`**: shows per-tool MCP call counts from
+  `.knowledge/usage.json`, written by the MCP server after each call.
+- **`relic_query include_intent` parameter**: opt-in `include_intent=false` drops
+  the `intent` column from exports (saves ~10% tokens on very large graphs).
+- **Tree-sitter semantic fields**: Go, Rust, and Java parsers now extract `intent`
+  (leading `///` / `//` / Javadoc comment) and decorators / `#[attrs]` /
+  `@Annotations` alongside symbol definitions.
+- **Rich markup stripping**: string literal indexer strips `[bold red]...[/bold red]`
+  markup before storing, preventing terminal control sequences from leaking into
+  search results.
+
+### Added (earlier — incremental reindex + freshness header)
 
 - **Incremental reindex**: `relic_reindex` now stat-sweeps the project tree and
   reparses only files whose mtime changed since the last index. Sub-second on

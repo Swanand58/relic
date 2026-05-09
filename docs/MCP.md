@@ -7,9 +7,10 @@ agent can call the four relic tools natively — no shell commands, no prompting
 relic mcp    # start the server (stdio transport)
 ```
 
-Every response begins with a one-line `index{age_s,stale,files_changed}` header so
-the agent always knows whether the graph is fresh — there is no separate "stats"
-tool to call. See [Freshness header](#freshness-header) below.
+Every response begins with an `index{age_s,stale,files_changed}` freshness header
+and a `cost{response_tokens,focus_file_tokens}` cost header so the agent always
+knows whether the graph is fresh and can decide whether to skip a query on tiny
+files — there is no separate "stats" tool to call. See [Response headers](#response-headers) below.
 
 ---
 
@@ -93,10 +94,14 @@ Get dependency context for a file or symbol before editing it.
 | `depth` | integer | no | `2` | BFS hops from target node. Use `1` for barrel/index files. |
 | `exclude_tests` | boolean | no | `true` | Filter test-file symbols from `neighbor_symbols` |
 | `max_neighbor_symbols` | integer | no | `30` | Cap neighbor symbols (0 = unlimited), ranked by connectivity |
+| `include_intent` | boolean | no | `true` | Include the `intent` column in the exports table. Set `false` to save ~10% tokens on very large graphs. |
 
-**Output:** TOON block — focus file, neighboring files, exported symbols, import/caller/calls edges.
+**Output:** TOON block — focus file, neighboring files, exported symbols (with intent), import/caller/calls edges, decorators.
 
 ```
+index{age_s,stale,files_changed}: 12,false,0
+cost{response_tokens,focus_file_tokens}: 847,312
+
 focus: src/payments/processor.py
 
 neighbors[3]{path,language,subproject}:
@@ -104,11 +109,15 @@ neighbors[3]{path,language,subproject}:
   src/payments/exceptions.py,python,payments
   src/core/database.py,python,core
 
-exports[4]{name,type,line,signature}:
-  PaymentProcessor,class,12,PaymentProcessor
-  process_payment,function,45,process_payment(order: Order) -> Receipt
-  validate_card,function,78,validate_card(card: Card) -> bool
-  RETRY_LIMIT,variable,8,RETRY_LIMIT
+exports[4]{name,type,line,signature,intent}:
+  PaymentProcessor,class,12,PaymentProcessor,Handles payment authorization and capture
+  process_payment,function,45,process_payment(order: Order) -> Receipt,Authorize card and emit receipt
+  validate_card,function,78,validate_card(card: Card) -> bool,
+  RETRY_LIMIT,variable,8,RETRY_LIMIT,
+
+decorators[2]{symbol,decorator,args}:
+  process_payment,app.route,/payments POST
+  validate_card,require_auth,
 
 neighbor_symbols[6]{name,type,file}:
   Payment,class,src/payments/models.py
@@ -152,34 +161,49 @@ Search for files and symbols across the knowledge graph by name.
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `query` | string | yes | — | Partial file path or symbol name (case-insensitive substring) |
+| `query` | string | yes | — | Partial file path or symbol name (case-insensitive substring). Wrap in double quotes to search string literals: `'"error message"'`. |
 | `kind` | string | no | `"all"` | Filter: `"file"`, `"symbol"`, or `"all"` |
 | `limit` | integer | no | `20` | Max results per category |
 
-**Output:**
+**Output (name search):**
 
 ```
+index{age_s,stale,files_changed}: 12,false,0
+cost{response_tokens,focus_file_tokens}: 312,0
+
 search: processor
 
 file_matches[2]{path,language,exports,imported_by}:
   src/payments/processor.py,python,4,3
   src/core/preprocessor.ts,typescript,2,1
 
-symbol_matches[3]{name,type,file,signature,callers}:
-  PaymentProcessor,class,src/payments/processor.py,PaymentProcessor,5
-  DataProcessor,class,src/core/preprocessor.ts,DataProcessor(BaseProcessor),2
-  process_payment,function,src/payments/processor.py,process_payment(order: Order) -> Receipt,7
+symbol_matches[3]{name,type,file,signature,callers,intent}:
+  PaymentProcessor,class,src/payments/processor.py,PaymentProcessor,5,Handles payment authorization and capture
+  DataProcessor,class,src/core/preprocessor.ts,DataProcessor(BaseProcessor),2,
+  process_payment,function,src/payments/processor.py,process_payment(order: Order) -> Receipt,7,Authorize card and emit receipt
+```
+
+**Output (quoted literal search):**
+
+```
+search: "authorize card"
+
+literal_matches[1]{value,symbol,file,line}:
+  Authorize card and emit receipt,process_payment,src/payments/processor.py,45
 ```
 
 Each hit carries enough context to skip the follow-up `relic_query` call in
 the common case: file results show `exports` (symbol count) and
-`imported_by` (in-edges); symbol results carry the signature and `callers`
-count (inbound `uses` + `calls` edges).  Signatures over 80 characters are
+`imported_by` (in-edges); symbol results carry the signature, callers count,
+and intent. Results matched via decorator or string literal show a `via` column
+(`via=decorator:app.route` or `via=literal`). Signatures over 80 characters are
 truncated with `…`; query the symbol directly for the full text.
 
 **Tips:**
 - Search by partial name: `"proc"` matches `processor`, `preprocess`, `ProducerConfig`
 - Search by directory: `"payments/"` returns only files in the payments subproject
+- Search string literals: `'"payment failed"'` (wrap in double quotes) matches string constants ≥ 8 chars inside function bodies
+- Search by decorator: `"app.route"` finds functions decorated with `@app.route`
 - Only follow up with `relic_query` when you need neighbors / full graph context
 
 ---
@@ -246,13 +270,16 @@ changed_symbols[4]{file,name,status}:
 
 ---
 
-## Freshness header
+## Response headers
 
-Every MCP response is prefixed with one line:
+Every MCP response is prefixed with two lines:
 
 ```
 index{age_s,stale,files_changed}: 42,false,0
+cost{response_tokens,focus_file_tokens}: 847,312
 ```
+
+### Freshness header (`index{...}`)
 
 | Field | Meaning |
 |---|---|
@@ -268,6 +295,19 @@ and cached for 2 seconds, so back-to-back calls in the same agent turn pay the
 cost only once. Agents should treat `stale=true` as the sole signal to call
 `relic_reindex` — there is no separate "stats" tool, and proactive reindexing
 when `stale=false` is wasted work.
+
+### Cost header (`cost{...}`)
+
+| Field | Meaning |
+|---|---|
+| `response_tokens` | Approximate token count of this response (encoded with tiktoken `cl100k_base`) |
+| `focus_file_tokens` | Approximate token count of the focus file on disk — present on `relic_query` responses only, `0` otherwise |
+
+Agents use `focus_file_tokens` to apply the SKIP rule: if `focus_file_tokens < 200`
+and the file has 0 callers, it's cheaper to just read the file directly instead
+of calling `relic_query`. The cost header is emitted on every response (including
+`relic_reindex` and `relic_search`), so agents can track cumulative MCP overhead
+without a separate tool call.
 
 ---
 

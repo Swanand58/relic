@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-09
+
+### Fixed
+
+- **`relic index` / `index.toon`**: `full_index_to_toon` now includes `intent` column in the symbols table (`{name,type,file,line,signature,intent}`). Previously only `relic_query` showed intent; the human-readable flat index omitted it.
+
 ## [0.5.0] - 2026-05-09
 
 ### Added
@@ -179,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache stability tests**: MCP `list_tools()` output is byte-identical
   across calls with no dynamic content leakage.
 
-[unreleased]: https://github.com/Swanand58/relic/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/Swanand58/relic/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Swanand58/relic/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Swanand58/relic/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/Swanand58/relic/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Swanand58/relic/compare/v0.4.0...v0.4.1

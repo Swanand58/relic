@@ -45,13 +45,13 @@ def _leading_intent(src_lines: list[str], start_line_0indexed: int) -> str:
         return (text[:79] + "…") if len(text) > 79 else text
     if line == "*/" or line.endswith("*/"):
         while idx >= 0:
-            l = src_lines[idx].strip()
-            if l.startswith("/**") or l.startswith("/*"):
-                text = l.lstrip("/*").rstrip("*/").strip()
+            ln = src_lines[idx].strip()
+            if ln.startswith("/**") or ln.startswith("/*"):
+                text = ln.lstrip("/*").rstrip("*/").strip()
                 if text and not text.startswith("@"):
                     return (text[:79] + "…") if len(text) > 79 else text
                 break
-            text = l.lstrip("* ").rstrip("*/").strip()
+            text = ln.lstrip("* ").rstrip("*/").strip()
             if text and not text.startswith("@"):
                 return (text[:79] + "…") if len(text) > 79 else text
             idx -= 1
@@ -129,10 +129,16 @@ class GoParser:
                     name = _node_text(name_node, src)
                     params = _go_func_sig(node, src, name)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "function", "line": ln + 1, "signature": params,
-                        "intent": _leading_intent(lines, ln), "decorators": [],
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": params,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
                     func_names.add(name)
 
             elif node.type == "method_declaration":
@@ -141,10 +147,16 @@ class GoParser:
                     name = _node_text(name_node, src)
                     params = _go_func_sig(node, src, name)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "function", "line": ln + 1, "signature": params,
-                        "intent": _leading_intent(lines, ln), "decorators": [],
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": params,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
                     func_names.add(name)
 
             elif node.type == "type_declaration":
@@ -157,10 +169,16 @@ class GoParser:
                         if type_node and type_node.type == "interface_type":
                             stype = "interface"
                         ln = spec.start_point[0]
-                        result.symbols.append({
-                            "name": name, "stype": stype, "line": ln + 1, "signature": name,
-                            "intent": _leading_intent(lines, ln), "decorators": [],
-                        })
+                        result.symbols.append(
+                            {
+                                "name": name,
+                                "stype": stype,
+                                "line": ln + 1,
+                                "signature": name,
+                                "intent": _leading_intent(lines, ln),
+                                "decorators": [],
+                            }
+                        )
 
             elif node.type == "import_declaration":
                 for spec in _walk(node):
@@ -227,11 +245,16 @@ class RustParser:
                     name = _node_text(name_node, src)
                     sig = _rust_func_sig(node, src, name)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "function", "line": ln + 1, "signature": sig,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_rust_attrs(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": sig,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
+                    )
                     func_names.add(name)
 
             elif node.type == "struct_item":
@@ -239,33 +262,48 @@ class RustParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "class", "line": ln + 1, "signature": name,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_rust_attrs(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
+                    )
 
             elif node.type == "enum_item":
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "class", "line": ln + 1, "signature": name,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_rust_attrs(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
+                    )
 
             elif node.type == "trait_item":
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "interface", "line": ln + 1, "signature": name,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_rust_attrs(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
+                    )
 
             elif node.type == "impl_item":
                 trait_node = node.child_by_field_name("trait")
@@ -274,15 +312,17 @@ class RustParser:
                     impl_name = _node_text(type_node, src)
                     trait_name = _node_text(trait_node, src)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": impl_name,
-                        "stype": "class",
-                        "line": ln + 1,
-                        "signature": f"{impl_name}({trait_name})",
-                        "extends": trait_name,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_rust_attrs(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": impl_name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": f"{impl_name}({trait_name})",
+                            "extends": trait_name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_rust_attrs(lines, ln),
+                        }
+                    )
 
             elif node.type == "use_declaration":
                 path_text = _node_text(node, src).removeprefix("use ").rstrip(";").strip()
@@ -366,11 +406,16 @@ class JavaParser:
                 if name_node:
                     name = _node_text(name_node, src)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "interface", "line": ln + 1, "signature": name,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_java_annotations(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
+                    )
 
             elif node.type == "method_declaration":
                 name_node = node.child_by_field_name("name")
@@ -378,11 +423,16 @@ class JavaParser:
                     name = _node_text(name_node, src)
                     sig = _java_method_sig(node, src, name)
                     ln = node.start_point[0]
-                    result.symbols.append({
-                        "name": name, "stype": "function", "line": ln + 1, "signature": sig,
-                        "intent": _leading_intent(lines, ln),
-                        "decorators": _leading_java_annotations(lines, ln),
-                    })
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": sig,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
+                    )
                     method_names.add(name)
 
             elif node.type == "import_declaration":

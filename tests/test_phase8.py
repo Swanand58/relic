@@ -6,12 +6,10 @@ import ast
 from pathlib import Path
 
 import networkx as nx
-import pytest
 
 from relic.indexer import (
     _analyse_python,
     _analyse_typescript,
-    _apply_file_data,
     _build_literal_index,
     _extract_python_decorators,
     _extract_python_intent,
@@ -19,9 +17,8 @@ from relic.indexer import (
     _extract_ts_decorators,
     _extract_ts_intent,
 )
-from relic.search import _is_literal_query, _search_literals, render_search_toon, search_graph
+from relic.search import _is_literal_query, render_search_toon, search_graph
 from relic.toon import subgraph_to_toon
-
 
 # ---------------------------------------------------------------------------
 # 8a — Python intent (docstrings)
@@ -114,9 +111,15 @@ class TestIntentInToon:
         G.add_node("src/pay.py", ntype="file", path="src/pay.py", language="python", subproject="")
         G.add_node(
             "compute@src/pay.py",
-            ntype="symbol", name="compute", stype="function",
-            path="src/pay.py", line=1, signature="compute() -> int",
-            intent=intent, decorators=[], literals=[],
+            ntype="symbol",
+            name="compute",
+            stype="function",
+            path="src/pay.py",
+            line=1,
+            signature="compute() -> int",
+            intent=intent,
+            decorators=[],
+            literals=[],
         )
         G.add_edge("src/pay.py", "compute@src/pay.py", etype="defines")
         return G
@@ -144,9 +147,15 @@ class TestIntentInToon:
         G.add_node("src/pay.py", ntype="file", path="src/pay.py", language="python", subproject="")
         G.add_node(
             "compute@src/pay.py",
-            ntype="symbol", name="compute", stype="function",
-            path="src/pay.py", line=1, signature="compute()",
-            intent="Compute payment.", decorators=[], literals=[],
+            ntype="symbol",
+            name="compute",
+            stype="function",
+            path="src/pay.py",
+            line=1,
+            signature="compute()",
+            intent="Compute payment.",
+            decorators=[],
+            literals=[],
         )
         G.add_edge("src/pay.py", "compute@src/pay.py", etype="defines")
         _, symbols, _ = search_graph(G, "compute")
@@ -225,7 +234,7 @@ class TestTypeScriptDecorators:
         assert _extract_ts_decorators(lines, 1) == []
 
     def test_ts_decorator_in_analyse(self, tmp_path: Path):
-        src = '@Component\nclass AppRoot {}\n'
+        src = "@Component\nclass AppRoot {}\n"
         _, symbols, _, _ = _analyse_typescript(src, "src/app.ts", tmp_path)
         sym = next(s for s in symbols if s["name"] == "AppRoot")
         assert sym["decorators"] == [{"name": "Component", "args": []}]
@@ -239,10 +248,17 @@ class TestTypeScriptDecorators:
 class TestDecoratorsToon:
     def test_decorators_section_emitted_when_present(self):
         file_nodes = [{"path": "src/views.py", "language": "python", "subproject": ""}]
-        sym_nodes = [{
-            "name": "login", "stype": "function", "path": "src/views.py", "line": 1,
-            "signature": "login()", "intent": "", "decorators": [{"name": "app.route", "args": ["/login"]}],
-        }]
+        sym_nodes = [
+            {
+                "name": "login",
+                "stype": "function",
+                "path": "src/views.py",
+                "line": 1,
+                "signature": "login()",
+                "intent": "",
+                "decorators": [{"name": "app.route", "args": ["/login"]}],
+            }
+        ]
         out = subgraph_to_toon("src/views.py", file_nodes, sym_nodes, [], [], [], include_intent=True)
         assert "decorators[" in out
         assert "app.route" in out
@@ -250,10 +266,17 @@ class TestDecoratorsToon:
 
     def test_no_decorators_section_when_none(self):
         file_nodes = [{"path": "src/views.py", "language": "python", "subproject": ""}]
-        sym_nodes = [{
-            "name": "login", "stype": "function", "path": "src/views.py", "line": 1,
-            "signature": "login()", "intent": "", "decorators": [],
-        }]
+        sym_nodes = [
+            {
+                "name": "login",
+                "stype": "function",
+                "path": "src/views.py",
+                "line": 1,
+                "signature": "login()",
+                "intent": "",
+                "decorators": [],
+            }
+        ]
         out = subgraph_to_toon("src/views.py", file_nodes, sym_nodes, [], [], [], include_intent=True)
         assert "decorators[" not in out
 
@@ -262,9 +285,15 @@ class TestDecoratorsToon:
         G.add_node("src/views.py", ntype="file", path="src/views.py", language="python", subproject="")
         G.add_node(
             "login@src/views.py",
-            ntype="symbol", name="login", stype="function",
-            path="src/views.py", line=1, signature="login()",
-            intent="", decorators=[{"name": "app.route", "args": ["/login"]}], literals=[],
+            ntype="symbol",
+            name="login",
+            stype="function",
+            path="src/views.py",
+            line=1,
+            signature="login()",
+            intent="",
+            decorators=[{"name": "app.route", "args": ["/login"]}],
+            literals=[],
         )
         G.add_edge("src/views.py", "login@src/views.py", etype="defines")
         _, symbols, _ = search_graph(G, "/login")
@@ -331,9 +360,14 @@ class TestLiteralIndex:
         G.add_node("src/errors.py", ntype="file", path="src/errors.py", language="python", subproject="")
         G.add_node(
             "raise_error@src/errors.py",
-            ntype="symbol", name="raise_error", stype="function",
-            path="src/errors.py", line=1, signature="raise_error()",
-            intent="", decorators=[],
+            ntype="symbol",
+            name="raise_error",
+            stype="function",
+            path="src/errors.py",
+            line=1,
+            signature="raise_error()",
+            intent="",
+            decorators=[],
             literals=[{"value": "rate limit exceeded", "line": 5}],
         )
         G.add_edge("src/errors.py", "raise_error@src/errors.py", etype="defines")
@@ -376,6 +410,7 @@ class TestLiteralIndex:
         src = 'def report_error():\n    raise ValueError("rate limit exceeded here")\n'
         (tmp_path / "errors.py").write_text(src, encoding="utf-8")
         from relic.indexer import build_graph
+
         G, _ = build_graph(tmp_path)
         assert "string_literals" in G.graph
 
@@ -388,24 +423,27 @@ class TestLiteralIndex:
 class TestCostHeader:
     def test_cost_header_present_in_mcp_response(self, tmp_project: Path):
         from relic.mcp_server import _handle_query
+
         result = _handle_query({"target": "src/processor.py", "depth": 1})
         text = result[0].text
         assert "cost{response_tokens,focus_file_tokens}:" in text
 
     def test_cost_header_after_freshness_header(self, tmp_project: Path):
         from relic.mcp_server import _handle_query
+
         result = _handle_query({"target": "src/processor.py", "depth": 1})
         text = result[0].text
         lines = text.splitlines()
-        index_line = next(i for i, l in enumerate(lines) if l.startswith("index{"))
-        cost_line = next(i for i, l in enumerate(lines) if l.startswith("cost{"))
+        index_line = next(i for i, ln in enumerate(lines) if ln.startswith("index{"))
+        cost_line = next(i for i, ln in enumerate(lines) if ln.startswith("cost{"))
         assert cost_line == index_line + 1
 
     def test_response_tokens_positive(self, tmp_project: Path):
         from relic.mcp_server import _handle_query
+
         result = _handle_query({"target": "src/processor.py", "depth": 1})
         text = result[0].text
-        cost_line = next(l for l in text.splitlines() if l.startswith("cost{"))
+        cost_line = next(ln for ln in text.splitlines() if ln.startswith("cost{"))
         vals = cost_line.split(": ", 1)[1].split(",")
         response_tokens = int(vals[0])
         assert response_tokens > 0
@@ -419,20 +457,24 @@ class TestCostHeader:
 class TestTieredRules:
     def test_tiered_must_has_criteria_a_b_c(self):
         from relic.agent_config import RELIC_INSTRUCTIONS
+
         assert "(a)" in RELIC_INSTRUCTIONS
         assert "(b)" in RELIC_INSTRUCTIONS
         assert "(c)" in RELIC_INSTRUCTIONS
 
     def test_cost_header_mentioned_in_rules(self):
         from relic.agent_config import RELIC_INSTRUCTIONS
+
         assert "cost{" in RELIC_INSTRUCTIONS
 
     def test_skip_rule_present(self):
         from relic.agent_config import RELIC_INSTRUCTIONS
+
         assert "SKIP" in RELIC_INSTRUCTIONS
 
     def test_should_query_symbol_present(self):
         from relic.agent_config import RELIC_INSTRUCTIONS
+
         assert "SHOULD call `relic_query <symbol>`" in RELIC_INSTRUCTIONS
 
 
@@ -444,11 +486,14 @@ class TestTieredRules:
 class TestAuditUsage:
     def test_compute_usage_audit_none_when_missing(self, tmp_path: Path):
         from relic.audit import compute_usage_audit
+
         assert compute_usage_audit(tmp_path) is None
 
     def test_compute_usage_audit_reads_json(self, tmp_path: Path):
         import json
+
         from relic.audit import compute_usage_audit
+
         data = {"query_count": 5, "search_count": 2}
         (tmp_path / "usage.json").write_text(json.dumps(data), encoding="utf-8")
         result = compute_usage_audit(tmp_path)

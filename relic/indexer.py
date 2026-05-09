@@ -414,13 +414,13 @@ def _extract_ts_intent(lines: list[str], sym_line_1indexed: int) -> str:
         return (text[:79] + "…") if len(text) > 79 else text
     if line == "*/" or line.endswith("*/"):
         while idx >= 0:
-            l = lines[idx].strip()
-            if l.startswith("/**") or l.startswith("/*"):
-                text = l.lstrip("/*").rstrip("*/").strip()
+            ln = lines[idx].strip()
+            if ln.startswith("/**") or ln.startswith("/*"):
+                text = ln.lstrip("/*").rstrip("*/").strip()
                 if text and not text.startswith("@"):
                     return (text[:79] + "…") if len(text) > 79 else text
                 break
-            text = l.lstrip("* ").rstrip("*/").strip()
+            text = ln.lstrip("* ").rstrip("*/").strip()
             if text and not text.startswith("@"):
                 return (text[:79] + "…") if len(text) > 79 else text
             idx -= 1
@@ -509,7 +509,10 @@ def _analyse_typescript(
             name = m.group(1)
             sig = f"{name}({m.group(2)})" if m.group(2) else name
             sym = {
-                "name": name, "stype": "class", "line": i, "signature": sig,
+                "name": name,
+                "stype": "class",
+                "line": i,
+                "signature": sig,
                 "intent": _extract_ts_intent(lines, i),
                 "decorators": _extract_ts_decorators(lines, i),
             }
@@ -518,30 +521,50 @@ def _analyse_typescript(
             symbols.append(sym)
         for m in _TS_FUNC_RE.finditer(line):
             sig = _ts_func_sig(stripped, m.group(1))
-            symbols.append({
-                "name": m.group(1), "stype": "function", "line": i, "signature": sig,
-                "intent": _extract_ts_intent(lines, i),
-                "decorators": _extract_ts_decorators(lines, i),
-            })
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "function",
+                    "line": i,
+                    "signature": sig,
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_ARROW_RE.finditer(line):
             sig = _ts_func_sig(stripped, m.group(1))
-            symbols.append({
-                "name": m.group(1), "stype": "function", "line": i, "signature": sig,
-                "intent": _extract_ts_intent(lines, i),
-                "decorators": _extract_ts_decorators(lines, i),
-            })
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "function",
+                    "line": i,
+                    "signature": sig,
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_IFACE_RE.finditer(line):
-            symbols.append({
-                "name": m.group(1), "stype": "interface", "line": i, "signature": m.group(1),
-                "intent": _extract_ts_intent(lines, i),
-                "decorators": _extract_ts_decorators(lines, i),
-            })
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "interface",
+                    "line": i,
+                    "signature": m.group(1),
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
         for m in _TS_TYPE_RE.finditer(line):
-            symbols.append({
-                "name": m.group(1), "stype": "type", "line": i, "signature": m.group(1),
-                "intent": _extract_ts_intent(lines, i),
-                "decorators": _extract_ts_decorators(lines, i),
-            })
+            symbols.append(
+                {
+                    "name": m.group(1),
+                    "stype": "type",
+                    "line": i,
+                    "signature": m.group(1),
+                    "intent": _extract_ts_intent(lines, i),
+                    "decorators": _extract_ts_decorators(lines, i),
+                }
+            )
 
     for pattern in (_TS_IMPORT_RE, _TS_REQUIRE_RE):
         for m in pattern.finditer(source):

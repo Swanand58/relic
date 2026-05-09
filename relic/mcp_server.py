@@ -49,8 +49,14 @@ server = Server("relic")
 # ---------------------------------------------------------------------------
 
 _usage_lock = threading.Lock()
-_USAGE_KEYS = ("query_count", "search_count", "reindex_count", "diff_count",
-               "total_response_tokens", "responses_under_200_tokens")
+_USAGE_KEYS = (
+    "query_count",
+    "search_count",
+    "reindex_count",
+    "diff_count",
+    "total_response_tokens",
+    "responses_under_200_tokens",
+)
 
 
 def _read_usage() -> dict:
@@ -379,7 +385,9 @@ def _handle_query(args: dict) -> list[TextContent]:
     if len(targets) == 1:
         return _wrap(
             _query_single(
-                G, targets[0], depth,
+                G,
+                targets[0],
+                depth,
                 exclude_tests=exclude_tests,
                 max_neighbor_symbols=max_neighbor_symbols,
                 include_intent=include_intent,
@@ -390,7 +398,9 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     sections = [
         _query_single(
-            G, t, depth,
+            G,
+            t,
+            depth,
             exclude_tests=exclude_tests,
             max_neighbor_symbols=max_neighbor_symbols,
             include_intent=include_intent,

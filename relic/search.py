@@ -141,12 +141,14 @@ def _search_literals(G: nx.DiGraph, query: str, limit: int) -> list[dict]:
                 if symbol_id not in G.nodes:
                     continue
                 d = G.nodes[symbol_id]
-                results.append({
-                    "value": orig_val,
-                    "symbol": d.get("name", ""),
-                    "file": d.get("path", ""),
-                    "line": line,
-                })
+                results.append(
+                    {
+                        "value": orig_val,
+                        "symbol": d.get("name", ""),
+                        "file": d.get("path", ""),
+                        "line": line,
+                    }
+                )
     return results[:limit]
 
 

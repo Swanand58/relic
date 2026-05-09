@@ -269,12 +269,12 @@ def full_index_to_toon(G: nx.DiGraph) -> str:
         w.table("files", ["path", "language"], file_rows).blank()
 
     sym_rows = [
-        [d["name"], d["stype"], d["path"], d["line"], d.get("signature", "")]
+        [d["name"], d["stype"], d["path"], d["line"], d.get("signature", ""), d.get("intent", "")]
         for _, d in sorted(G.nodes(data=True))
         if d.get("ntype") == "symbol"
     ]
     if sym_rows:
-        w.table("symbols", ["name", "type", "file", "line", "signature"], sym_rows).blank()
+        w.table("symbols", ["name", "type", "file", "line", "signature", "intent"], sym_rows).blank()
 
     import_rows = [[u, v] for u, v, d in sorted(G.edges(data=True)) if d.get("etype") == "imports"]
     if import_rows:

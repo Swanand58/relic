@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (Phase 8 — Semantic Index)
+## [0.5.0] - 2026-05-09
+
+### Added
 
 - **Symbol intent**: first line of docstring or leading comment per symbol stored
   as an `intent` field (max 80 chars). Visible in `relic_query` exports table
@@ -17,9 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table. Decorator-matched search results show `via=decorator:<name>`.
 - **String literal index**: string constants ≥ 8 chars inside function bodies
   indexed in an inverted lookup (max 20 per symbol, max 200 chars each). Search
-  by quoting the query: `relic_search '"payment failed"'`. Results in
+  by quoting the query: `relic_search '"payment failed"'`. Results in a
   `literal_matches[N]{value,symbol,file,line}` table.
-- **Cost header**: every MCP response now emits a second header line
+- **Cost header**: every MCP response emits a second header line
   `cost{response_tokens,focus_file_tokens}`. Agents use `focus_file_tokens` to
   apply the SKIP rule without an extra roundtrip.
 - **Tiered agent rules**: MUST/SHOULD/SKIP tiers replace the flat MUST list.
@@ -36,9 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markup before storing, preventing terminal control sequences from leaking into
   search results.
 
-### Added (earlier — incremental reindex + freshness header)
+## [0.4.2] - 2026-05-07
 
-- **Incremental reindex**: `relic_reindex` now stat-sweeps the project tree and
+### Added
+
+- **Incremental reindex**: `relic_reindex` stat-sweeps the project tree and
   reparses only files whose mtime changed since the last index. Sub-second on
   large monorepos. Backed by a new `.knowledge/mtimes.json` sidecar (atomic
   writes).
@@ -62,6 +66,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reindex and the freshness header, the agent owns staleness — a separate
   background watcher process (and the `watchdog` dependency) is no longer
   needed.
+
+## [0.4.1] - 2026-05-06
+
+### Fixed
+
+- Absolute GitHub URLs in README so PyPI renders images and links correctly.
+
+## [0.4.0] - 2026-05-06
+
+### Added
+
+- **Calls / called-by edges**: `calls` and `called_by` TOON tables show which
+  functions call which, at the symbol level, without reading source files.
+- **Tree-sitter support** (optional `relic-graph[treesitter]` extra): Go, Rust,
+  and Java source files are now indexed via `tree-sitter-language-pack` —
+  structs, interfaces, functions, enums, traits, methods, and import edges.
+- **`relic --init <agent>`**: writes agent instructions and MCP server
+  registration in one command for Claude Code, Cursor, GitHub Copilot, and
+  OpenAI Codex. Re-running is safe — updates existing block without duplicating.
+- **`.relicignore`**: glob-based exclusion file (same syntax as `.gitignore`)
+  to skip generated, vendored, or noisy directories from indexing.
+- **`relic index` delta + skip stats**: shows new/removed files, changed
+  symbols, skipped directories, and `.relicignore` exclusion counts after each
+  full rebuild.
+- **Zero-config**: all commands work without a `relic.yaml` — subproject labels
+  are optional. Every source file with a recognized extension is indexed
+  automatically.
+- **`max_neighbor_symbols` + `exclude_tests` params** on `relic_query`: cap
+  neighbor symbol count and filter test-file symbols from output to reduce
+  token cost on large graphs.
+
+### Changed
+
+- TOON `exports` table gained `signature` column (was already in v0.2.0 output
+  but column header was implicit).
+- `relic index` now prints a structured delta instead of a raw file list.
 
 ## [0.2.3] - 2026-05-05
 
@@ -139,6 +179,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache stability tests**: MCP `list_tools()` output is byte-identical
   across calls with no dynamic content leakage.
 
-[unreleased]: https://github.com/Swanand58/relic/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/Swanand58/relic/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Swanand58/relic/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/Swanand58/relic/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/Swanand58/relic/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Swanand58/relic/compare/v0.2.3...v0.4.0
+[0.2.3]: https://github.com/Swanand58/relic/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/Swanand58/relic/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/Swanand58/relic/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Swanand58/relic/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Swanand58/relic/releases/tag/v0.1.0

@@ -69,9 +69,7 @@ def compute_impact(G: nx.DiGraph, target: str, max_depth: int = 0) -> dict[str, 
     depth_map: dict[str, int] = dict(reachable_set)
     depth_map.pop(node, None)  # exclude self
 
-    affected_files = sorted(
-        {n for n in depth_map if G.nodes[n].get("ntype") == "file"} if G.has_node(node) else set()
-    )
+    affected_files = sorted({n for n in depth_map if G.nodes[n].get("ntype") == "file"} if G.has_node(node) else set())
     affected_symbols = sorted(n for n in depth_map if G.nodes.get(n, {}).get("ntype") == "symbol")
 
     return {

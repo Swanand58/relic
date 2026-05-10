@@ -378,7 +378,7 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     # Shorthand: "impact:TARGET" → blast-radius analysis
     if target.startswith("impact:"):
-        inner = target[len("impact:"):].strip()
+        inner = target[len("impact:") :].strip()
         G, err = _load_or_error(KNOWLEDGE_DIR)
         if err:
             return _wrap(err, call_type="query")

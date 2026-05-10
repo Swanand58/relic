@@ -765,8 +765,10 @@ class SwiftParser:
                 name_node = node.child_by_field_name("name")
                 if name_node:
                     name = _node_text(name_node, src)
-                    stype = "class" if node.type in ("class_declaration", "actor_declaration") else (
-                        "class" if node.type == "struct_declaration" else "class"
+                    stype = (
+                        "class"
+                        if node.type in ("class_declaration", "actor_declaration")
+                        else ("class" if node.type == "struct_declaration" else "class")
                     )
                     ln = node.start_point[0]
                     result.symbols.append(

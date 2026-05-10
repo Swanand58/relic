@@ -385,6 +385,88 @@ def diff_cmd() -> None:
     console.print(toon)
 
 
+@app.command(name="impact")
+def impact_cmd(
+    target: str = typer.Argument(..., help="File path or symbol (name@path) to trace impact for.", metavar="TARGET"),
+    depth: int = typer.Option(0, "--depth", "-d", help="Max hops (0 = full transitive closure)."),
+) -> None:
+    """Show every file transitively affected if TARGET changes.
+
+    Walks imported_by + uses edges from TARGET outward, collecting all
+    dependents. Use this for blast-radius analysis before refactoring.
+    Output is TOON for agent consumption or human review.
+    """
+    from relic.impact import compute_impact, render_impact_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    result = compute_impact(G, target, max_depth=depth)
+    if result is None:
+        console.print(style.error(f"not found in graph: {target!r}"))
+        raise SystemExit(1)
+
+    print(render_impact_toon(target, result))
+    err_console.print(style.dim(f"impact: {target} {style.DOT} {len(result['affected_files'])} file(s) affected"))
+
+
+@app.command(name="path")
+def path_cmd(
+    source: str = typer.Argument(..., help="Source file or symbol.", metavar="SOURCE"),
+    dest: str = typer.Argument(..., help="Destination file or symbol.", metavar="DEST"),
+) -> None:
+    """Find the shortest dependency path between two nodes.
+
+    Useful for understanding how A → B are connected through the import/call
+    graph. Output is TOON listing the path nodes and their edge types.
+    """
+    from relic.impact import compute_path, render_path_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    result = compute_path(G, source, dest)
+    if result is None:
+        console.print(style.error(f"no path found between {source!r} and {dest!r}"))
+        raise SystemExit(1)
+
+    print(render_path_toon(source, dest, result))
+    err_console.print(style.dim(f"path: {source} → {dest} {style.DOT} {len(result['nodes'])} hop(s)"))
+
+
+@app.command(name="communities")
+def communities_cmd(
+    limit: int = typer.Option(20, "--limit", "-l", help="Max communities to show."),
+) -> None:
+    """Show file communities discovered by graph clustering.
+
+    Groups files by how they cluster in the import graph (Louvain method).
+    Each community is a cohesive module boundary — useful for architecture
+    review and spotting unexpected cross-community coupling.
+    """
+    from relic.impact import render_communities_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    communities = G.graph.get("communities", {})
+    if not communities:
+        console.print(style.dim("no communities detected — run `relic index` to rebuild"))
+        return
+
+    print(render_communities_toon(communities, limit=limit))
+    err_console.print(style.dim(f"communities: {len(communities)} total"))
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,

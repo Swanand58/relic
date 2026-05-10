@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-09
+
+### Added
+
+- **Edge evidence labels**: every import/use/call/extend edge carries an `evidence` attribute — `ast` (Python), `treesitter` (Go/Rust/Java/C#/Kotlin/Scala/PHP/Swift), `regex` (TypeScript/JavaScript), `convention` (test mapping). Agents can see how trustworthy each edge is.
+- **Community detection**: Louvain clustering on the file import graph. Each file node gets a `community` integer. `relic communities` CLI command shows community tables; communities surface as architecture boundaries.
+- **`relic impact TARGET`**: transitive blast-radius — every file that transitively imports/uses/calls TARGET. MCP shorthand: `relic_query "impact:TARGET"`.
+- **`relic path SOURCE DEST`**: shortest dependency path between two files or symbols. MCP shorthand: `relic_query "SOURCE->DEST"`.
+- **Languages batch 2**: C# (`.cs`), Kotlin (`.kt`, `.kts`), Scala (`.scala`), PHP (`.php`), Swift (`.swift`) via `tree-sitter-language-pack` (requires `relic-graph[treesitter]`).
+- **Static doc indexing**: Markdown H1/H2 headings, OpenAPI/Swagger endpoints (`GET /path`), JSON Schema `definitions`/`$defs`, `pyproject.toml` package + scripts, `package.json` name + scripts — all indexed as symbols.
+- **`relic communities` CLI command**: shows file clusters discovered by Louvain graph clustering.
+
 ## [0.5.1] - 2026-05-09
 
 ### Fixed
@@ -185,7 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cache stability tests**: MCP `list_tools()` output is byte-identical
   across calls with no dynamic content leakage.
 
-[unreleased]: https://github.com/Swanand58/relic/compare/v0.5.1...HEAD
+[unreleased]: https://github.com/Swanand58/relic/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Swanand58/relic/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Swanand58/relic/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Swanand58/relic/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/Swanand58/relic/compare/v0.4.1...v0.4.2

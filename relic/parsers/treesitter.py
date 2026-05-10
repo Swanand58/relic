@@ -1,4 +1,4 @@
-"""Tree-sitter based parsers for Go, Rust, and Java.
+"""Tree-sitter based parsers for Go, Rust, Java, C#, Kotlin, Scala, PHP, Swift.
 
 These are activated only when ``tree-sitter-language-pack`` is installed::
 
@@ -473,6 +473,355 @@ def _java_method_sig(node, src: bytes, name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# C#
+# ---------------------------------------------------------------------------
+
+
+class CSharpParser:
+    lang = "csharp"
+
+    def analyse(self, source: str, rel_path: str, project_root: Path) -> AnalysisResult:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser("c_sharp")
+        src = source.encode("utf-8")
+        tree = parser.parse(src)
+        root = tree.root_node
+        lines = _src_lines(src)
+
+        result = AnalysisResult()
+
+        for node in _walk(root):
+            if node.type in ("class_declaration", "record_declaration", "struct_declaration"):
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
+                    )
+
+            elif node.type == "interface_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
+                    )
+
+            elif node.type == "method_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": _leading_java_annotations(lines, ln),
+                        }
+                    )
+
+            elif node.type == "using_directive":
+                ns = _node_text(node, src).removeprefix("using ").rstrip(";").strip()
+                result.imports.append(ns)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Kotlin
+# ---------------------------------------------------------------------------
+
+
+class KotlinParser:
+    lang = "kotlin"
+
+    def analyse(self, source: str, rel_path: str, project_root: Path) -> AnalysisResult:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser("kotlin")
+        src = source.encode("utf-8")
+        tree = parser.parse(src)
+        root = tree.root_node
+        lines = _src_lines(src)
+
+        result = AnalysisResult()
+
+        for node in _walk(root):
+            if node.type == "class_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type in ("function_declaration", "secondary_constructor"):
+                name_node = node.child_by_field_name("simple_identifier") or node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "import_header":
+                path_text = _node_text(node, src).removeprefix("import ").strip()
+                result.imports.append(path_text)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Scala
+# ---------------------------------------------------------------------------
+
+
+class ScalaParser:
+    lang = "scala"
+
+    def analyse(self, source: str, rel_path: str, project_root: Path) -> AnalysisResult:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser("scala")
+        src = source.encode("utf-8")
+        tree = parser.parse(src)
+        root = tree.root_node
+        lines = _src_lines(src)
+
+        result = AnalysisResult()
+
+        for node in _walk(root):
+            if node.type in ("class_definition", "object_definition", "trait_definition"):
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    stype = "interface" if node.type == "trait_definition" else "class"
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": stype,
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "function_definition":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "import_declaration":
+                path_text = _node_text(node, src).removeprefix("import ").strip()
+                result.imports.append(path_text)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# PHP
+# ---------------------------------------------------------------------------
+
+
+class PhpParser:
+    lang = "php"
+
+    def analyse(self, source: str, rel_path: str, project_root: Path) -> AnalysisResult:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser("php")
+        src = source.encode("utf-8")
+        tree = parser.parse(src)
+        root = tree.root_node
+        lines = _src_lines(src)
+
+        result = AnalysisResult()
+
+        for node in _walk(root):
+            if node.type == "class_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "class",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "interface_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type in ("function_definition", "method_declaration"):
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "namespace_use_declaration":
+                path_text = _node_text(node, src).strip()
+                result.imports.append(path_text)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Swift
+# ---------------------------------------------------------------------------
+
+
+class SwiftParser:
+    lang = "swift"
+
+    def analyse(self, source: str, rel_path: str, project_root: Path) -> AnalysisResult:
+        from tree_sitter_language_pack import get_parser
+
+        parser = get_parser("swift")
+        src = source.encode("utf-8")
+        tree = parser.parse(src)
+        root = tree.root_node
+        lines = _src_lines(src)
+
+        result = AnalysisResult()
+
+        for node in _walk(root):
+            if node.type in ("class_declaration", "struct_declaration", "enum_declaration", "actor_declaration"):
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    stype = (
+                        "class"
+                        if node.type in ("class_declaration", "actor_declaration")
+                        else ("class" if node.type == "struct_declaration" else "class")
+                    )
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": stype,
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "protocol_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "interface",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "function_declaration":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    name = _node_text(name_node, src)
+                    ln = node.start_point[0]
+                    result.symbols.append(
+                        {
+                            "name": name,
+                            "stype": "function",
+                            "line": ln + 1,
+                            "signature": name,
+                            "intent": _leading_intent(lines, ln),
+                            "decorators": [],
+                        }
+                    )
+
+            elif node.type == "import_declaration":
+                path_text = _node_text(node, src).removeprefix("import ").strip()
+                result.imports.append(path_text)
+
+        return result
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -498,3 +847,8 @@ def register_all() -> None:
     register(GoParser())
     register(RustParser())
     register(JavaParser())
+    register(CSharpParser())
+    register(KotlinParser())
+    register(ScalaParser())
+    register(PhpParser())
+    register(SwiftParser())

@@ -430,50 +430,200 @@ explicitly flag the rest as unknown.
 
 ---
 
-## Phase 9 — Intelligence + Remaining Languages
+## Phase 9 — Coding-Task Intelligence
 
-The original Phase 8 roadmap, deferred so Phase 8 can focus on the semantic index.
+Goal: make relic answer the three questions every agent asks before touching code —
+"what breaks if I change this?", "how does A connect to B?", "where is this endpoint
+defined?" — without reading a single file.
 
-### 9a — Intelligence
+Relic's differentiator vs. graphify: deterministic edges + symbol-level precision =
+trustworthy blast-radius analysis. Graphify explores concepts; relic does pre-flight
+for coding tasks.
 
-**9a.1: Community detection (lightweight, no LLM)**
+Explicitly cut from this phase (covered by linters, or computable from existing TOON):
+inline hints, cycle detection, unused symbol detection, change safety score.
 
-Use NetworkX built-in `louvain_communities` to assign a `community` attribute to each
-file node. Surface in TOON output. New CLI command: `relic communities`.
+### 9a — Impact radius (`relic impact`)
 
-**9a.2: `relic explain <symbol>`** — signature, callers, callees, community, test
-files. Becomes the single human-facing surface for *all* the semantic data 8a–8c
-indexed.
+The single biggest agent pain point not covered by existing tools or graphify.
 
-**9a.3: `relic path <A> <B>`** — shortest dependency path between two symbols/files.
+**Problem it solves**
 
-**9a.4: Graph diff improvements** — calls edges, community shifts, impact radius.
+`relic_query validate_card` shows direct callers (1 file). But `checkout_handler` is
+called by `billing_worker` which is called by `stripe_webhook`. If I change
+`validate_card`'s signature, 3 files break — relic only shows me 1 today.
 
-**9a.5: Effects fingerprint** (deferred from Phase 8) — done with transitive
-call-graph closure so "does X hit the DB?" is correct, not just "does X *directly*
-hit the DB?".
+**What it does**
 
-### 9b — Languages batch 2
+`relic impact <symbol|file>` walks the graph transitively via `imported_by` and `uses`
+edges (NetworkX `nx.descendants` on reversed graph). Returns:
 
-C#, Kotlin, Scala, PHP, Swift, Lua.
+```
+impact: validate_card
 
-### 9c — Languages batch 3
+direct_callers[1]{file,symbol,line}:
+  src/api/views.py,checkout_handler,112
+
+transitive_callers[2]{file,symbol,hops}:
+  src/workers/billing.py,process_batch,2
+  src/api/webhooks.py,stripe_callback,3
+
+tests_affected[1]{file}:
+  tests/test_payments.py
+
+total_files_affected: 3
+```
+
+**Also exposed via MCP** as `relic_query "impact:validate_card"` — no new tool, agent
+uses existing `relic_query` with an `impact:` prefix target.
+
+**Token budget:** bounded by `limit` param (default 20 per section). Worst-case ~300
+tokens for a high-connectivity symbol.
+
+### 9b — Path query (`relic path`)
+
+**Problem it solves**
+
+Agent planning a refactor needs to know the dependency chain between two components.
+"How does the webhook handler end up calling the database?" Today: grep + read files.
+
+**What it does**
+
+`relic path <A> <B>` returns shortest dependency path via `nx.shortest_path`. Works
+for both files and symbols. Also available as `relic_query "A->B"` for MCP callers.
+
+```
+path: src/api/webhooks.py → src/core/database.py
+hops[4]{from,to,edge_type,evidence}:
+  src/api/webhooks.py,src/payments/processor.py,imports,ast
+  src/payments/processor.py,process_payment,defines,ast
+  process_payment,DatabaseSession,calls,ast
+  src/payments/processor.py,src/core/database.py,imports,ast
+```
+
+Includes `evidence` on each hop (see 9d) so agent knows which hops are exact vs.
+approximated.
+
+### 9c — Community detection (`relic communities`)
+
+**Problem it solves**
+
+Subproject labels in `relic.yaml` reflect directory structure, not actual coupling.
+Two files in different directories that heavily import each other belong to the same
+functional module — community detection reveals this without manual config.
+
+**What it does**
+
+`networkx.community.louvain_communities` on the import graph. Assigns `community`
+integer to every file node. No new dependency — NetworkX already ships Louvain.
+
+Surfaced in:
+- `relic_query`: `community: 3 (12 files)` line in focus file header
+- `relic communities`: table of community → member files, ranked by size
+- `relic impact`: flags when transitive callers span multiple communities (higher risk)
+- `relic_search`: `-c <id>` filter to scope results to one community
+
+Agent value: "this change is community-isolated → low cascade risk" vs "cross-community
+→ check transitive callers carefully."
+
+### 9d — Edge evidence labels
+
+**Problem it solves**
+
+Relic's TS/JS regex call detection is approximate — it matches `identifier(` patterns
+but can't resolve overloaded names. Agents planning refactors need to know which edges
+to trust unconditionally vs. treat as likely-but-unverified.
+
+**What gets tagged**
+
+Every edge gains an `evidence` attribute at index time:
+- `ast` — Python AST (exact)
+- `treesitter` — tree-sitter parse for Go/Rust/Java (exact)
+- `regex` — TS/JS/other regex match (approximate)
+- `convention` — test mapping by filename convention
+
+**Where it surfaces**
+
+- `relic_query`: `imports[N]{from,to,evidence}`, `calls[N]{caller,callee,evidence}`
+- `relic path`: per-hop evidence (see 9b example above)
+- `relic impact`: transitive callers via `regex` edges flagged as `~approximate`
+
+Not INFERRED or AMBIGUOUS edges — no new guessing, just labelling the analysis method.
+
+### 9e — Static doc indexing
+
+**Problem it solves**
+
+"Where is the `/login` endpoint defined?" still requires grep even with Phase 8
+decorator search — if the framework uses a router object (`router.add_route(...)`) the
+decorator isn't on the function. OpenAPI specs and config files are authoritative
+sources relic currently ignores.
+
+**Supported formats (static parsing only, zero LLM)**
+
+| Format | Extraction | Indexed as |
+|---|---|---|
+| `openapi.yaml` / `swagger.yaml` | HTTP paths, operationId, summary | Symbol nodes `stype=endpoint`; summary as `intent` |
+| `*.json` (JSON Schema) | `$id`, top-level property names, `description` | Symbol nodes `stype=schema` |
+| `pyproject.toml` / `package.json` | Package name, scripts, deps | File node; script names as symbols |
+| `*.md` / `*.rst` | H1–H3 headings, internal links | File node; first heading as `intent` |
+
+**Where it surfaces**
+
+- `relic_query openapi.yaml` → exports table with endpoint symbols
+- `relic_search "/login"` → matches endpoint symbol, intent = `POST /login — Authenticate user`
+- `relic_search "migrate"` → matches `package.json` script `db:migrate`
+
+PDF, image, video — permanently out of scope (require LLM).
+
+### 9f — Languages batch 2
+
+C#, Kotlin, Scala, PHP, Swift — all via tree-sitter (optional dep already ships).
+
+### Release plan
+
+| Release | Contains |
+|---------|----------|
+| v0.6.0 | All of Phase 9 (9a–9f) |
+
+---
+
+## Phase 10 — Breadth + Visualization
+
+Features from the original Phase 9 roadmap that need Phase 9 foundations first, or
+are lower priority vs. agent utility.
+
+### 10a — Effects fingerprint
+
+Transitive call-graph closure to answer "does X hit the DB/network/filesystem?".
+Deferred from Phase 8 and Phase 9 — doing it shallowly (direct calls only) is
+misleading; needs full call closure from Phase 9 to be correct.
+
+### 10b — Languages batch 3
 
 Zig, Elixir, Objective-C, Julia, SQL, Fortran.
 
-### 9d — Visualization
+### 10c — `relic viz`
 
-**`relic viz`** — Generate interactive HTML graph (D3.js or vis.js, single file, zero
-Python deps). `relic viz` opens in default browser.
+Interactive HTML graph (D3.js or vis.js, single file, zero Python deps at runtime).
+Nodes colored by community, filterable by subproject. `relic viz` opens in default
+browser. Lower agent utility than 9a–9c; high human utility for onboarding.
 
 ---
 
 ## What we are NOT doing (and why)
 
-- **PDF / docs / image extraction** — requires LLM calls, contradicts zero-cost philosophy
-- **INFERRED or AMBIGUOUS edges** — Relic's graph is deterministic, no guessing
+- **PDF / image / video extraction** — requires LLM calls, contradicts zero-cost philosophy
+- **INFERRED or AMBIGUOUS edges** — relic's graph is deterministic. `evidence` (9d) labels analysis method, not guesses
 - **Semantic similarity edges** — needs embeddings/LLM, not our lane
-- **Global cross-repo graphs** — nice-to-have but not a priority vs. single-repo excellence
+- **Natural language graph queries** — the agent's job; relic provides structured data
+- **URL ingestion (papers, tweets)** — non-code, LLM-dependent
+- **Wiki / Obsidian export** — TOON is more token-efficient for agents
+- **Global cross-repo graphs** — single-repo excellence first
+- **Inline agent hints in TOON** — computable from existing output; adds tokens without new data
+- **`relic cycles`** — linters (ruff, mypy) catch circular imports; not relic's job
+- **`relic unused`** — linters cover dead code detection better
+- **Change safety score** — agents compute from `imported_by` count + `tested_by` already in TOON
 
 ---
 

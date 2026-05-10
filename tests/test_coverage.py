@@ -48,12 +48,13 @@ class TestComputeCoverage:
         assert any(p.endswith("also_good.ts") for p in indexed)
         assert any(p.endswith("nested/inner.py") for p in indexed)
 
-    def test_no_parser_bucket_collects_md_and_yaml(self, tmp_path: Path):
+    def test_indexed_files_include_md_and_yaml(self, tmp_path: Path):
+        # .md (markdown) and .yaml (data) are now indexed, not skipped.
         root, subprojects = _make_subproject(tmp_path)
         cov = compute_coverage(root, subprojects)
-        no_parser = cov["subprojects"]["app"]["skipped"]["no_parser"]
-        assert any(p.endswith("README.md") for p in no_parser)
-        assert any(p.endswith("config.yaml") for p in no_parser)
+        indexed = cov["subprojects"]["app"]["indexed"]
+        assert any(p.endswith("README.md") for p in indexed)
+        assert any(p.endswith("config.yaml") for p in indexed)
 
     def test_too_large_bucket_includes_size(self, tmp_path: Path):
         root, subprojects = _make_subproject(tmp_path)
@@ -99,10 +100,10 @@ class TestComputeCoverage:
         root, subprojects = _make_subproject(tmp_path)
         cov = compute_coverage(root, subprojects)
         totals = cov["totals"]
-        # 3 indexed (good.py, also_good.ts, nested/inner.py)
-        assert totals["indexed"] == 3
-        # 2 no_parser (README.md, config.yaml)
-        assert totals["no_parser"] == 2
+        # 5 indexed (good.py, also_good.ts, nested/inner.py, README.md, config.yaml)
+        assert totals["indexed"] == 5
+        # 0 no_parser (.md/.yaml now indexed)
+        assert totals["no_parser"] == 0
         # 1 too_large (huge.py)
         assert totals["too_large"] == 1
 
@@ -137,14 +138,15 @@ class TestRenderCoverage:
 
     def test_verbose_lists_all_skipped_files(self, tmp_path: Path):
         # Build many no_parser files to exceed the example limit
+        # Use .xyz — an extension with no registered parser
         src = tmp_path / "src"
         src.mkdir()
         for i in range(12):
-            (src / f"doc_{i}.md").write_text("x", encoding="utf-8")
+            (src / f"doc_{i}.xyz").write_text("x", encoding="utf-8")
         cov = compute_coverage(tmp_path, {"app": {"path": "./src", "description": ""}})
         non_verbose = self._capture(cov, verbose=False)
         verbose = self._capture(cov, verbose=True)
         assert "more (use --verbose)" in non_verbose
         assert "more (use --verbose)" not in verbose
         for i in range(12):
-            assert f"doc_{i}.md" in verbose
+            assert f"doc_{i}.xyz" in verbose

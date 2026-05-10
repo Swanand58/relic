@@ -36,7 +36,7 @@ Relic also measures its own cost. `relic audit` shows exactly what relic adds to
 
 ```
 relic init              # scan project, build knowledge graph (seconds, no LLM)
-relic --init claude     # write CLAUDE.md + register MCP server in .claude/settings.json
+relic --init claude     # write CLAUDE.md + register MCP server in .mcp.json
 ```
 
 Agent calls `relic_query` before touching unfamiliar code:
@@ -161,7 +161,7 @@ subprojects:
 ### 2. Wire your agent
 
 ```bash
-relic --init claude     # Claude Code    → CLAUDE.md + .claude/settings.json
+relic --init claude     # Claude Code    → CLAUDE.md + .mcp.json
 relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md + .vscode/mcp.json
 relic --init cursor     # Cursor         → .cursorrules + .cursor/mcp.json
 relic --init codex      # OpenAI Codex   → AGENTS.md

@@ -202,8 +202,9 @@ AGENTS: dict[str, dict] = {
     "claude": {
         "name": "Claude Code",
         "path": "CLAUDE.md",
-        # MCP config: merged into existing settings JSON under mcpServers key
-        "mcp_config": ".claude/settings.json",
+        # Project-scope MCP registration — Claude Code reads mcpServers from .mcp.json,
+        # NOT from .claude/settings.json (which is for hooks/permissions only).
+        "mcp_config": ".mcp.json",
         "mcp_key": "mcpServers",
         "mcp_server": {"command": "relic", "args": ["mcp"]},
     },
@@ -234,7 +235,6 @@ def _write_mcp_config(agent_key: str, project_root: Path) -> str:
     """Write MCP server registration for the given agent.
 
     Merges into existing config — does not overwrite unrelated keys.
-    For Claude Code, also strips stale PreToolUse hooks from older relic versions.
     Returns 'created' or 'updated'.
     """
     agent = AGENTS[agent_key]
@@ -253,32 +253,42 @@ def _write_mcp_config(agent_key: str, project_root: Path) -> str:
 
     config.setdefault(agent["mcp_key"], {})["relic"] = agent["mcp_server"]
 
-    # Claude Code only: strip stale relic PreToolUse hooks from older versions
-    if agent_key == "claude":
-        hooks = config.get("hooks", {})
-        pre_tool_use = hooks.get("PreToolUse", [])
-        cleaned = [
-            entry
-            for entry in pre_tool_use
-            if not (
-                isinstance(entry, dict)
-                and any(isinstance(h, dict) and "relic" in h.get("command", "") for h in entry.get("hooks", []))
-            )
-        ]
-        if cleaned != pre_tool_use:
-            hooks["PreToolUse"] = cleaned
-            if not cleaned:
-                del hooks["PreToolUse"]
-            if not hooks:
-                config.pop("hooks", None)
-            else:
-                config["hooks"] = hooks
-
     config_path.write_text(
         json.dumps(config, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     return action
+
+
+def _strip_stale_claude_hooks(project_root: Path) -> None:
+    """Remove stale relic PreToolUse hooks written by older relic versions into .claude/settings.json."""
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.exists():
+        return
+    try:
+        config = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    hooks = config.get("hooks", {})
+    pre_tool_use = hooks.get("PreToolUse", [])
+    cleaned = [
+        entry
+        for entry in pre_tool_use
+        if not (
+            isinstance(entry, dict)
+            and any(isinstance(h, dict) and "relic" in h.get("command", "") for h in entry.get("hooks", []))
+        )
+    ]
+    if cleaned == pre_tool_use:
+        return
+    hooks["PreToolUse"] = cleaned
+    if not cleaned:
+        del hooks["PreToolUse"]
+    if not hooks:
+        config.pop("hooks", None)
+    else:
+        config["hooks"] = hooks
+    settings_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def init_agent(agent_key: str, project_root: Path) -> None:
@@ -294,6 +304,9 @@ def init_agent(agent_key: str, project_root: Path) -> None:
         config_path = project_root / agent["mcp_config"]
         console.print(f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} [dim]{config_path}[/dim]")
         console.print("[dim]tools: relic_query, relic_search, relic_reindex, relic_diff[/dim]")
+
+    if agent_key == "claude":
+        _strip_stale_claude_hooks(project_root)
 
 
 def init_all_agents(project_root: Path) -> None:

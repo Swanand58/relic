@@ -27,10 +27,10 @@ from relic.agent_config import RELIC_INSTRUCTIONS
 from relic.benchmark import _tokens
 from relic.mcp_server import list_tools
 
-# Hard caps. Numbers we picked: at the time of writing, instructions sit
-# at ~651 tokens and combined MCP tooling at ~364 tokens, so each cap has
-# breathing room without being so loose that a 30 % regression slips by.
-INSTRUCTION_BUDGET = 800
+# Hard caps. Phase 9 added impact/path shorthands to the decision tree,
+# raising the instruction baseline to ~854 tokens. Budget raised to 950
+# with breathing room; MCP budget unchanged (still 4 tools, ~551 tokens).
+INSTRUCTION_BUDGET = 950
 MCP_TOTAL_BUDGET = 600
 
 

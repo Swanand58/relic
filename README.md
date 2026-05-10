@@ -17,6 +17,9 @@ Relic builds a static knowledge graph from your source code in seconds (no LLM).
 - Class inheritance chains
 - Decorator/annotation index (search by `@pytest.mark.parametrize`, `@app.route`, etc.)
 - String literal index (search by quoting: `relic_search '"payment failed"'`)
+- Full blast-radius of any change (`relic impact`) — every file transitively affected
+- Shortest dependency path between any two files or symbols (`relic path A B`)
+- Architecture clusters — file communities discovered from the import graph (`relic communities`)
 
 300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
@@ -173,7 +176,7 @@ and can decide whether to skip a query on small files.
 
 | Tool | When to call |
 |---|---|
-| `relic_query` | Before editing unfamiliar code — returns imports, exports (with intent), signatures, neighbors, callers, calls, decorators, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`), `include_intent` toggle. |
+| `relic_query` | Before editing unfamiliar code — returns imports, exports (with intent), signatures, neighbors, callers, calls, decorators, test files. Supports batch (`"A B C"`), dotted notation (`Class.method`), `include_intent` toggle. Shorthands: `"impact:TARGET"` for blast-radius, `"A->B"` for shortest path. |
 | `relic_search` | When you don't know where a class/function/file lives. Quote the query (`"error message"`) to search string literals inside function bodies. |
 | `relic_reindex` | When the response header reports `stale=true`, or after creating, editing, or deleting source files. Incremental, sub-second. |
 | `relic_diff` | When you want a per-file breakdown of what changed before reindexing |
@@ -298,6 +301,9 @@ relic search <term>                # ranked search across files and symbols
 relic search '"literal text"'      # search string literals inside function bodies
 relic search <term> -k symbol      # filter to symbols (or `file`, `all`)
 relic search <term> -s <name>      # restrict to a subproject
+relic impact <file|symbol>         # blast-radius: every file transitively affected
+relic path <source> <dest>         # shortest dependency path between two nodes
+relic communities                  # show file clusters from Louvain graph clustering
 relic stats                        # index health: counts, last_updated, subprojects
 relic diff                         # what changed since last index (new/deleted/changed)
 relic coverage                     # what's indexed vs skipped, with reasons
@@ -323,16 +329,56 @@ relic --version                    # print version
 | Python | ✓ | classes, functions (full signatures) | ✓ (docstring) | ✓ (`@decorator`) | ✓ (ast) | ✓ (ast) | ✓ (`extends`) | ✓ (`test_foo.py`) |
 | TypeScript / TSX | ✓ | classes, functions, interfaces, types | ✓ (leading comment) | ✓ (`@decorator`) | ✓ | ✓ (regex) | ✓ (`extends`) | ✓ (`foo.test.ts`) |
 | JavaScript / JSX | ✓ | classes, functions | ✓ (leading comment) | ✓ (`@decorator`) | ✓ | ✓ (regex) | ✓ | ✓ |
-| Go | ✓ | structs, interfaces, functions | ✓ (leading `//` comment) | — | ✓ | ✓ | — | — |
-| Rust | ✓ | structs, enums, traits, functions | ✓ (leading `///` comment) | ✓ (`#[attr]`) | ✓ | ✓ | ✓ (`impl`) | — |
+| Go | ✓ | structs, interfaces, functions | ✓ (leading `//`) | — | ✓ | ✓ | — | — |
+| Rust | ✓ | structs, enums, traits, functions | ✓ (leading `///`) | ✓ (`#[attr]`) | ✓ | ✓ | ✓ (`impl`) | — |
 | Java | ✓ | classes, interfaces, methods | ✓ (Javadoc) | ✓ (`@Annotation`) | ✓ | ✓ | ✓ (`extends`) | — |
-| Other | ✓ (file nodes only) | — | — | — | — | — | — | — |
+| C# | ✓ | classes, interfaces, methods | ✓ (leading `//`) | ✓ (`[Attr]`) | ✓ | — | — | — |
+| Kotlin | ✓ | classes, functions | ✓ (leading `//`) | — | ✓ | — | — | — |
+| Scala | ✓ | classes, traits, objects, functions | ✓ (leading `//`) | — | ✓ | — | ✓ | — |
+| PHP | ✓ | classes, interfaces, functions | ✓ (leading `//`) | — | ✓ | — | — | — |
+| Swift | ✓ | classes, structs, protocols, functions | ✓ (leading `//`) | — | ✓ | — | — | — |
+| Markdown | ✓ | H1/H2 headings as symbols | — | — | — | — | — | — |
+| OpenAPI YAML/JSON | ✓ | HTTP endpoints (`GET /path`) | ✓ (summary) | — | — | — | — | — |
+| JSON Schema | ✓ | `definitions`/`$defs` entries | ✓ (description) | — | — | — | — | — |
+| pyproject.toml | ✓ | package name + script entry points | ✓ (description) | — | — | — | — | — |
+| package.json | ✓ | package name + npm scripts | ✓ (description) | — | — | — | — | — |
 
-Go, Rust, and Java support requires the optional `treesitter` extra:
+Go, Rust, Java, C#, Kotlin, Scala, PHP, and Swift support requires the optional `treesitter` extra:
 
 ```bash
 pip install relic-graph[treesitter]
 ```
+
+---
+
+## Graph analysis
+
+### Blast-radius before refactoring
+
+```bash
+relic impact src/core/payments.py
+relic impact PaymentProcessor
+```
+
+Shows every file that transitively imports, uses, or calls the target — and how many hops away each is. Run this before renaming a class or changing a function signature. Agents can call the same analysis via `relic_query "impact:TARGET"`.
+
+### Shortest path between two nodes
+
+```bash
+relic path src/api/views.py src/core/database.py
+relic path UserSerializer PaymentProcessor
+```
+
+Finds the shortest chain of import/call/use edges connecting SOURCE to DEST, with each hop's edge type and evidence label (`ast`/`treesitter`/`regex`/`convention`). Useful for understanding unexpected coupling. MCP shorthand: `relic_query "src/api/views.py->src/core/database.py"`.
+
+### Architecture communities
+
+```bash
+relic communities
+relic communities --limit 10
+```
+
+Runs Louvain clustering on the file import graph and prints each community as a TOON table. Communities represent cohesive module boundaries — files that strongly import each other end up together. Useful for spotting unexpected cross-module coupling or planning a monorepo split.
 
 ---
 

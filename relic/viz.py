@@ -212,9 +212,11 @@ svg {{ width: 100%; height: 100%; }}
 .node text {{ pointer-events: none; font-size: 9px; fill: #D8DEE9; text-anchor: middle; dominant-baseline: central; }}
 .node.highlighted circle {{ stroke: #EBCB8B !important; stroke-width: 3px; }}
 .node.impact circle {{ stroke: #BF616A !important; stroke-width: 3px; fill: #3d1f22 !important; }}
-.node.dimmed circle {{ opacity: 0.15; }}
-.node.dimmed text {{ opacity: 0.1; }}
-.link.dimmed {{ opacity: 0.03 !important; }}
+.node.dimmed circle {{ opacity: 0.12; }}
+.node.dimmed text {{ opacity: 0.08; }}
+.link.dimmed {{ opacity: 0.02 !important; }}
+.node.filtered circle {{ stroke: #A3BE8C !important; stroke-width: 2.5px; filter: drop-shadow(0 0 4px #A3BE8C88); }}
+.node.filtered text {{ fill: #ECEFF4 !important; font-weight: bold; }}
 #tooltip {{ position: absolute; background: #3B4252; border: 1px solid #4C566A; border-radius: 4px; padding: 7px 10px; font-size: 11px; pointer-events: none; opacity: 0; transition: opacity 0.12s; max-width: 220px; z-index: 100; }}
 #tooltip .tip-etype {{ color: #88C0D0; }}
 #tooltip .tip-ev {{ color: #697283; }}
@@ -255,7 +257,7 @@ svg {{ width: 100%; height: 100%; }}
         </div>
       </div>
     </div>
-    <div id="panel"><div class="empty">click a node to inspect</div></div>
+    <div id="panel"><div class="empty">click a node to inspect · double-click to focus</div></div>
   </div>
   <div id="canvas">
     <div id="tooltip"></div>
@@ -294,14 +296,17 @@ const g   = svg.append('g');
 const zoom = d3.zoom().scaleExtent([0.05, 8]).on('zoom', e => g.attr('transform', e.transform));
 svg.call(zoom);
 
-// ── Build impact map (reverse adjacency for blast-radius) ─────────────────
-const impactMap = new Map(); // nodeIndex → Set of dependent indices
-GRAPH.nodes.forEach((_, i) => impactMap.set(i, new Set()));
+// ── Build adjacency maps ───────────────────────────────────────────────────
+const impactMap = new Map(); // nodeIndex → Set of dependent indices (reverse)
+const neighborMap = new Map(); // nodeIndex → Set of all adjacent indices (undirected)
+GRAPH.nodes.forEach((_, i) => {{ impactMap.set(i, new Set()); neighborMap.set(i, new Set()); }});
 GRAPH.links.forEach(l => {{
   const src = typeof l.source === 'object' ? l.source.index : l.source;
   const tgt = typeof l.target === 'object' ? l.target.index : l.target;
   if (!impactMap.has(tgt)) impactMap.set(tgt, new Set());
   impactMap.get(tgt).add(src);
+  neighborMap.get(src).add(tgt);
+  neighborMap.get(tgt).add(src);
 }});
 
 function getImpact(idx) {{
@@ -375,8 +380,11 @@ link
 
 // ── Click → panel + blast-radius ──────────────────────────────────────────
 let selected = null;
+let focusedIdx = null; // double-click focus mode
+
 node.on('click', (e, d) => {{
   e.stopPropagation();
+  if (focusedIdx !== null) return; // single-click suppressed while in focus mode
   const idx = GRAPH.nodes.indexOf(d);
   if (selected === idx) {{ clearSelection(); return; }}
   selected = idx;
@@ -394,13 +402,54 @@ node.on('click', (e, d) => {{
 
   renderPanel(d, impact.size);
 }});
+
+// ── Double-click → 2-hop focus mode ───────────────────────────────────────
+node.on('dblclick', (e, d) => {{
+  e.stopPropagation();
+  const idx = GRAPH.nodes.indexOf(d);
+  if (focusedIdx === idx) {{ exitFocusMode(); return; }}
+  focusedIdx = idx;
+
+  // Collect 2-hop neighborhood
+  const hop1 = neighborMap.get(idx) || new Set();
+  const visible = new Set([idx, ...hop1]);
+  hop1.forEach(n => (neighborMap.get(n) || new Set()).forEach(n2 => visible.add(n2)));
+
+  node.classed('highlighted', (_, i) => i === idx)
+      .classed('filtered',    (_, i) => i !== idx && visible.has(i))
+      .classed('dimmed',      (_, i) => !visible.has(i))
+      .classed('impact', false);
+
+  link.classed('dimmed', l => {{
+    const s = typeof l.source === 'object' ? GRAPH.nodes.indexOf(l.source) : l.source;
+    const t = typeof l.target === 'object' ? GRAPH.nodes.indexOf(l.target) : l.target;
+    return !visible.has(s) || !visible.has(t);
+  }});
+
+  const visibleNodes = GRAPH.nodes.filter((_, i) => visible.has(i));
+  zoomToNodes(visibleNodes);
+  renderPanel(d, getImpact(idx).size);
+}});
+
+function exitFocusMode() {{
+  focusedIdx = null;
+  selected = null;
+  node.classed('highlighted dimmed impact filtered', false);
+  link.classed('dimmed', false);
+  document.getElementById('panel').innerHTML = '<div class="empty">click a node to inspect · double-click to focus</div>';
+  applyFilters();
+}}
+
 svg.on('click', clearSelection);
+svg.on('dblclick', exitFocusMode);
 
 function clearSelection() {{
+  if (focusedIdx !== null) return;
   selected = null;
   node.classed('highlighted dimmed impact', false);
   link.classed('dimmed', false);
-  document.getElementById('panel').innerHTML = '<div class="empty">click a node to inspect</div>';
+  document.getElementById('panel').innerHTML = '<div class="empty">click a node to inspect · double-click to focus</div>';
+  applyFilters();
 }}
 
 function renderPanel(d, impactCount) {{
@@ -435,19 +484,44 @@ function applyFilters() {{
   const lang  = langSel.value;
   const comm  = commSel.value !== '' ? parseInt(commSel.value) : null;
   const sp    = spSel.value;
-  node.classed('dimmed', d =>
-    (lang && d.language !== lang) ||
-    (comm !== null && d.community !== comm) ||
-    (sp && d.subproject !== sp)
-  );
+  const active = lang || comm !== null || sp;
+
+  function nodeMatches(d) {{
+    return (!lang || d.language === lang) &&
+           (comm === null || d.community === comm) &&
+           (!sp || d.subproject === sp);
+  }}
+
+  node.classed('filtered', d => active && nodeMatches(d))
+      .classed('dimmed',   d => active && !nodeMatches(d));
+
   link.classed('dimmed', l => {{
+    if (!active) return false;
     const s = typeof l.source === 'object' ? l.source : GRAPH.nodes[l.source];
     const t = typeof l.target === 'object' ? l.target : GRAPH.nodes[l.target];
-    return (lang && (s.language !== lang || t.language !== lang)) ||
-           (comm !== null && (s.community !== comm || t.community !== comm)) ||
-           (sp && (s.subproject !== sp || t.subproject !== sp));
+    return !nodeMatches(s) || !nodeMatches(t);
   }});
+
+  if (active) {{
+    const matched = GRAPH.nodes.filter(nodeMatches);
+    if (matched.length > 0) zoomToNodes(matched);
+  }}
 }}
+
+function zoomToNodes(nodes) {{
+  const pad = 80;
+  const xs = nodes.map(d => d.x).filter(v => v != null);
+  const ys = nodes.map(d => d.y).filter(v => v != null);
+  if (!xs.length) return;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const bw = x1 - x0 || 1, bh = y1 - y0 || 1;
+  const scale = Math.min(8, 0.9 * Math.min((W - pad * 2) / bw, (H - pad * 2) / bh));
+  const tx = W / 2 - scale * (x0 + bw / 2);
+  const ty = H / 2 - scale * (y0 + bh / 2);
+  svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}}
+
 [langSel, commSel, spSel].forEach(el => el.addEventListener('change', applyFilters));
 
 // ── Zoom controls ──────────────────────────────────────────────────────────

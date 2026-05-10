@@ -528,6 +528,31 @@ def viz_cmd(
         err_console.print(style.dim(f"viz: opened {target}"))
 
 
+@app.command(name="cycles")
+def cycles_cmd(
+    limit: int = typer.Option(20, "--limit", "-l", help="Max cycles to show (0 = all)."),
+    min_len: int = typer.Option(2, "--min-len", "-m", help="Minimum cycle length to report."),
+) -> None:
+    """Detect circular dependencies in the file dependency graph.
+
+    Circular imports cause subtle bugs and make refactoring painful.
+    Each cycle is shown as a chain of files that mutually depend on each other.
+    Fix by extracting shared symbols into a common module that neither side imports from.
+    MCP shorthand: relic_query "cycles"
+    """
+    from relic.cycles import compute_cycles, render_cycles_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    cycles = compute_cycles(G, min_len=min_len)
+    print(render_cycles_toon(cycles, limit=limit))
+    err_console.print(style.dim(f"cycles: {len(cycles)} found"))
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,

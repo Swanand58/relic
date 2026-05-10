@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "relic-graph"
-version = "0.6.0"
+version = "0.7.0"
 description = "Codebase knowledge management CLI for AI coding agents"
 readme = "README.md"
 license = "MIT"
@@ -47,6 +47,8 @@ select = ["E", "F", "I"]
 # the LLM. Splitting them with implicit-concat hurts readability without
 # changing the output. Keep them long.
 "relic/agent_config.py" = ["E501"]
+# viz.py embeds a large HTML/CSS/JS template — long lines are intentional.
+"relic/viz.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

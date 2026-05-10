@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "relic": {
+      "command": "relic",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

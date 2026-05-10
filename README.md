@@ -25,6 +25,9 @@ Relic builds a static knowledge graph from your source code in seconds (no LLM).
 - Full blast-radius of any change (`relic impact`) — every file transitively affected
 - Shortest dependency path between any two files or symbols (`relic path A B`)
 - Architecture clusters — file communities discovered from the import graph (`relic communities`)
+- Graph centrality weights — PageRank + betweenness to find load-bearing files (`relic centrality`)
+- Circular dependency detection across the full file graph (`relic cycles`)
+- Interactive D3 force-directed knowledge graph in the browser (`relic viz`)
 
 300–1200 tokens. Via MCP — works with Claude Code, Cursor, Copilot, and any MCP-compatible agent.
 
@@ -36,7 +39,7 @@ Relic also measures its own cost. `relic audit` shows exactly what relic adds to
 
 ```
 relic init              # scan project, build knowledge graph (seconds, no LLM)
-relic --init claude     # write CLAUDE.md + register MCP server in .claude/settings.json
+relic --init claude     # write CLAUDE.md + register MCP server in .mcp.json
 ```
 
 Agent calls `relic_query` before touching unfamiliar code:
@@ -161,7 +164,7 @@ subprojects:
 ### 2. Wire your agent
 
 ```bash
-relic --init claude     # Claude Code    → CLAUDE.md + .claude/settings.json
+relic --init claude     # Claude Code    → CLAUDE.md + .mcp.json
 relic --init copilot    # GitHub Copilot → .github/copilot-instructions.md + .vscode/mcp.json
 relic --init cursor     # Cursor         → .cursorrules + .cursor/mcp.json
 relic --init codex      # OpenAI Codex   → AGENTS.md
@@ -309,6 +312,9 @@ relic search <term> -s <name>      # restrict to a subproject
 relic impact <file|symbol>         # blast-radius: every file transitively affected
 relic path <source> <dest>         # shortest dependency path between two nodes
 relic communities                  # show file clusters from Louvain graph clustering
+relic centrality [--top N] [--by pagerank|betweenness|in_degree|out_degree]
+relic cycles [--limit N]           # detect circular dependencies in the file graph
+relic viz [--out path.html]        # open interactive D3 knowledge graph in browser
 relic stats                        # index health: counts, last_updated, subprojects
 relic diff                         # what changed since last index (new/deleted/changed)
 relic coverage                     # what's indexed vs skipped, with reasons
@@ -384,6 +390,40 @@ relic communities --limit 10
 ```
 
 Runs Louvain clustering on the file import graph and prints each community as a TOON table. Communities represent cohesive module boundaries — files that strongly import each other end up together. Useful for spotting unexpected cross-module coupling or planning a monorepo split.
+
+### Graph centrality
+
+```bash
+relic centrality --top 10
+relic centrality --by betweenness
+```
+
+Computes PageRank and betweenness centrality on the file dependency graph. PageRank identifies the most structurally important files (many important files depend on them). Betweenness identifies bridge files that sit between communities — highest risk to change. Run before a refactor to find load-bearing files.
+
+### Circular dependency detection
+
+```bash
+relic cycles
+relic cycles --limit 5
+```
+
+Detects all circular import chains in the file dependency graph using `nx.simple_cycles()`. Cycles are shown as chains sorted by length. Each cycle is a set of files that mutually depend on each other — fix by extracting shared code into a common module. MCP shorthand: `relic_query "cycles"`.
+
+### Interactive knowledge graph
+
+```bash
+relic viz
+relic viz --out graph.html   # save instead of opening
+```
+
+Opens a self-contained D3.js force-directed graph in your browser. Node size = PageRank, color = community (Nord palette), edge opacity = evidence quality (`ast` > `treesitter` > `regex` > `convention`). Features:
+
+- **Click** any node → blast-radius overlay (red = affected files) + side panel with metadata
+- **Double-click** any node → focus mode: collapses graph to 2-hop neighborhood, auto-zooms to fit
+- **Double-click canvas** → exit focus mode
+- **Filter dropdowns** → filter by language, community, or subproject with auto-zoom to matching nodes
+- **Search box** → highlight matching nodes by filename
+- **Zoom controls** → in/out/reset
 
 ---
 

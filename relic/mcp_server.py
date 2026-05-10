@@ -207,7 +207,8 @@ async def list_tools() -> list[Tool]:
                 "editing any unfamiliar file. Ambiguous symbol → TOON candidates "
                 "list; re-query with full file path. Supports space-separated "
                 "targets for batch query and Class.method dotted notation. "
-                "Shorthands: 'impact:TARGET' for blast-radius, 'A->B' for shortest path."
+                "Shorthands: 'impact:TARGET' for blast-radius, 'A->B' for shortest path, "
+                "'cycles' for circular dependency detection."
             ),
             inputSchema={
                 "type": "object",
@@ -388,6 +389,16 @@ def _handle_query(args: dict) -> list[TextContent]:
         if result is None:
             return _wrap(f"Not found: '{inner}'. Use relic_search to explore.", call_type="query")
         return _wrap(render_impact_toon(inner, result), call_type="query")
+
+    # Shorthand: "cycles" → circular dependency detection
+    if target.strip().lower() == "cycles":
+        G, err = _load_or_error(KNOWLEDGE_DIR)
+        if err:
+            return _wrap(err, call_type="query")
+        from relic.cycles import compute_cycles, render_cycles_toon
+
+        cycles = compute_cycles(G)
+        return _wrap(render_cycles_toon(cycles), call_type="query")
 
     # Shorthand: "A->B" → shortest path
     if "->" in target and not target.startswith("-"):

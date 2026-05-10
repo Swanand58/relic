@@ -467,6 +467,92 @@ def communities_cmd(
     err_console.print(style.dim(f"communities: {len(communities)} total"))
 
 
+@app.command(name="centrality")
+def centrality_cmd(
+    top: int = typer.Option(20, "--top", "-n", help="Max rows to show (0 = all)."),
+    sort_by: str = typer.Option(
+        "pagerank", "--by", "-b", help="Sort key: pagerank, betweenness, in_degree, out_degree."
+    ),  # noqa: E501
+) -> None:
+    """Show graph centrality weights for every file.
+
+    PageRank identifies structurally important files (many important files
+    depend on them). Betweenness identifies bridge files that sit between
+    communities — highest risk to change. Use before refactoring to find
+    the load-bearing files.
+    """
+    from relic.centrality import compute_centrality, render_centrality_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    rows = compute_centrality(G)
+    if not rows:
+        console.print(style.dim("no file nodes in graph — run `relic index` first"))
+        return
+
+    print(render_centrality_toon(rows, top=top, sort_by=sort_by))
+    err_console.print(style.dim(f"centrality: {len(rows)} files · sorted by {sort_by}"))
+
+
+@app.command(name="viz")
+def viz_cmd(
+    out: Optional[str] = typer.Option(
+        None, "--out", "-o", help="Save HTML to this path instead of opening in browser."
+    ),  # noqa: E501
+) -> None:
+    """Open an interactive knowledge graph in your browser.
+
+    Force-directed D3 visualization. Node size = PageRank importance,
+    color = community, edge opacity = evidence quality. Click any node
+    to see its blast-radius highlighted in red and inspect its metadata.
+    Drag nodes, filter by language/community, search by filename.
+    """
+    from relic.viz import open_viz
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    out_path = Path(out) if out else None
+    target = open_viz(G, out_path=out_path)
+
+    if out:
+        console.print(style.success(f"saved → {target}"))
+    else:
+        err_console.print(style.dim(f"viz: opened {target}"))
+
+
+@app.command(name="cycles")
+def cycles_cmd(
+    limit: int = typer.Option(20, "--limit", "-l", help="Max cycles to show (0 = all)."),
+    min_len: int = typer.Option(2, "--min-len", "-m", help="Minimum cycle length to report."),
+) -> None:
+    """Detect circular dependencies in the file dependency graph.
+
+    Circular imports cause subtle bugs and make refactoring painful.
+    Each cycle is shown as a chain of files that mutually depend on each other.
+    Fix by extracting shared symbols into a common module that neither side imports from.
+    MCP shorthand: relic_query "cycles"
+    """
+    from relic.cycles import compute_cycles, render_cycles_toon
+
+    try:
+        G = load_graph(KNOWLEDGE_DIR)
+    except FileNotFoundError as exc:
+        console.print(style.error(str(exc)))
+        raise SystemExit(1)
+
+    cycles = compute_cycles(G, min_len=min_len)
+    print(render_cycles_toon(cycles, limit=limit))
+    err_console.print(style.dim(f"cycles: {len(cycles)} found"))
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,

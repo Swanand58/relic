@@ -157,7 +157,7 @@ class TestInitAgent:
         import json
 
         init_agent("claude", tmp_project)
-        cfg = json.loads((tmp_project / ".claude/settings.json").read_text(encoding="utf-8"))
+        cfg = json.loads((tmp_project / ".mcp.json").read_text(encoding="utf-8"))
         assert cfg["mcpServers"]["relic"]["command"] == "relic"
 
     @pytest.mark.parametrize("agent_key", list(AGENTS.keys()))

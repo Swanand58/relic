@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/Swanand58/relic/actions/workflows/ci.yml"><img src="https://github.com/Swanand58/relic/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://pypi.org/project/relic-graph/"><img src="https://img.shields.io/pypi/v/relic-graph" alt="PyPI"/></a>
   <a href="https://www.python.org"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
   <a href="https://github.com/Swanand58/relic/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/></a>
 </p>

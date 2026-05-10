@@ -59,6 +59,12 @@ You don't know where something lives
     → `relic_search <name>` (use `kind=symbol` or `kind=file` to narrow,
       `subproject=<name>` in monorepos).
 
+About to rename a symbol or change a widely-used interface
+    → `relic_query "impact:<symbol>"` — every file that will break.
+
+Need the shortest link between two files or symbols
+    → `relic_query "A->B"`.
+
 Response header says `stale=true`, or you just created / deleted / moved a file
     → `relic_reindex`. (No need to call this proactively if `stale=false`.)
 
@@ -101,6 +107,7 @@ TOON tables declare column names once, then list values row-by-row.
 ```bash
 relic query __RELIC_EXAMPLE_FILE__
 relic search PaymentProcessor
+relic impact PaymentProcessor
 relic index
 ```
 

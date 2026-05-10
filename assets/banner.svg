@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 160" width="800" height="160">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2E3440"/>
+      <stop offset="100%" style="stop-color:#3B4252"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="160" rx="12" fill="url(#bg)"/>
+
+  <!-- Graph edges (connecting nodes) -->
+  <line x1="82" y1="80" x2="122" y2="52" stroke="#4C566A" stroke-width="1.5" opacity="0.8"/>
+  <line x1="82" y1="80" x2="122" y2="108" stroke="#4C566A" stroke-width="1.5" opacity="0.8"/>
+  <line x1="122" y1="52" x2="162" y2="80" stroke="#4C566A" stroke-width="1.5" opacity="0.8"/>
+  <line x1="122" y1="108" x2="162" y2="80" stroke="#4C566A" stroke-width="1.5" opacity="0.8"/>
+  <line x1="42" y1="52" x2="82" y2="80" stroke="#4C566A" stroke-width="1.5" opacity="0.5"/>
+  <line x1="42" y1="108" x2="82" y2="80" stroke="#4C566A" stroke-width="1.5" opacity="0.5"/>
+
+  <!-- Graph nodes — outer ring (dim) -->
+  <polygon points="42,40 52,40 57,49 52,58 42,58 37,49" fill="#3B4252" stroke="#4C566A" stroke-width="1.5"/>
+  <polygon points="42,96 52,96 57,105 52,114 42,114 37,105" fill="#3B4252" stroke="#4C566A" stroke-width="1.5"/>
+
+  <!-- Graph nodes — mid (secondary blue) -->
+  <polygon points="114,40 126,40 132,51 126,62 114,62 108,51" fill="#3B4252" stroke="#5E81AC" stroke-width="1.8"/>
+  <polygon points="114,98 126,98 132,109 126,120 114,120 108,109" fill="#3B4252" stroke="#5E81AC" stroke-width="1.8"/>
+
+  <!-- Graph node — center (brand frost blue, glowing) -->
+  <polygon points="74,67 90,67 98,80 90,93 74,93 66,80" fill="#2E3440" stroke="#88C0D0" stroke-width="2.2" filter="url(#glow)"/>
+  <!-- Inner hex mark -->
+  <polygon points="78,72 86,72 90,80 86,88 78,88 74,80" fill="#88C0D0" opacity="0.25"/>
+  <text x="82" y="84" text-anchor="middle" font-family="monospace" font-size="11" fill="#88C0D0" font-weight="bold" filter="url(#glow)">⬢</text>
+
+  <!-- Wordmark -->
+  <text x="210" y="100" font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', monospace"
+        font-size="64" font-weight="700" letter-spacing="-2"
+        fill="#88C0D0" filter="url(#glow)">relic</text>
+
+  <!-- Tagline -->
+  <text x="212" y="125" font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', monospace"
+        font-size="13" fill="#697283" letter-spacing="1">codebase knowledge graph for AI agents</text>
+
+  <!-- Right-side decorative graph (faint) -->
+  <line x1="660" y1="55" x2="700" y2="80" stroke="#4C566A" stroke-width="1.2" opacity="0.6"/>
+  <line x1="700" y1="80" x2="740" y2="55" stroke="#4C566A" stroke-width="1.2" opacity="0.6"/>
+  <line x1="700" y1="80" x2="740" y2="105" stroke="#4C566A" stroke-width="1.2" opacity="0.6"/>
+  <line x1="660" y1="105" x2="700" y2="80" stroke="#4C566A" stroke-width="1.2" opacity="0.6"/>
+  <line x1="740" y1="55" x2="760" y2="80" stroke="#4C566A" stroke-width="1" opacity="0.4"/>
+  <line x1="740" y1="105" x2="760" y2="80" stroke="#4C566A" stroke-width="1" opacity="0.4"/>
+
+  <polygon points="652,44 662,44 667,53 662,62 652,62 647,53" fill="#3B4252" stroke="#4C566A" stroke-width="1.2" opacity="0.7"/>
+  <polygon points="652,99 662,99 667,108 662,117 652,117 647,108" fill="#3B4252" stroke="#4C566A" stroke-width="1.2" opacity="0.7"/>
+  <polygon points="693,68 705,68 711,80 705,92 693,92 687,80" fill="#2E3440" stroke="#81A1C1" stroke-width="1.8" opacity="0.9"/>
+  <polygon points="733,44 743,44 748,53 743,62 733,62 728,53" fill="#3B4252" stroke="#5E81AC" stroke-width="1.5" opacity="0.8"/>
+  <polygon points="733,99 743,99 748,108 743,117 733,117 728,108" fill="#3B4252" stroke="#5E81AC" stroke-width="1.5" opacity="0.8"/>
+  <polygon points="753,68 763,68 768,80 763,92 753,92 748,80" fill="#3B4252" stroke="#4C566A" stroke-width="1.2" opacity="0.5"/>
+</svg>

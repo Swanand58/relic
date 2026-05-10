@@ -1,8 +1,12 @@
-# relic
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Swanand58/relic/main/assets/banner.svg" alt="relic" width="800"/>
+</p>
 
-[![CI](https://github.com/Swanand58/relic/actions/workflows/ci.yml/badge.svg)](https://github.com/Swanand58/relic/actions/workflows/ci.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/Swanand58/relic/blob/main/LICENSE)
+<p align="center">
+  <a href="https://github.com/Swanand58/relic/actions/workflows/ci.yml"><img src="https://github.com/Swanand58/relic/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://www.python.org"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/></a>
+  <a href="https://github.com/Swanand58/relic/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/></a>
+</p>
 
 Relic solves the cold-read problem in AI coding agents.
 

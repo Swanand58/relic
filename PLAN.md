@@ -588,10 +588,11 @@ C#, Kotlin, Scala, PHP, Swift — all via tree-sitter (optional dep already ship
 
 ---
 
-## Phase 10 — Breadth + Visualization
+## Phase 10 — Breadth + Visualization (v0.7.0)
 
-Features from the original Phase 9 roadmap that need Phase 9 foundations first, or
-are lower priority vs. agent utility.
+Human-facing graph intelligence. Phase 9 gave agents blast-radius and path queries;
+Phase 10 makes the graph beautiful and interpretable for humans doing architecture
+review, onboarding, and refactoring planning.
 
 ### 10a — Effects fingerprint
 
@@ -605,9 +606,39 @@ Zig, Elixir, Objective-C, Julia, SQL, Fortran.
 
 ### 10c — `relic viz`
 
-Interactive HTML graph (D3.js or vis.js, single file, zero Python deps at runtime).
-Nodes colored by community, filterable by subproject. `relic viz` opens in default
-browser. Lower agent utility than 9a–9c; high human utility for onboarding.
+Interactive force-directed graph — single self-contained HTML file, D3.js v7 via
+CDN, zero Python deps at runtime.
+
+**Visual encoding:**
+- Node **size** = PageRank centrality (structurally important files appear biggest)
+- Node **color** = Louvain community (same clusters `relic communities` shows)
+- Edge **opacity + width** = evidence weight (ast=thick/opaque, treesitter=medium,
+  regex=thin, convention=dashed)
+- Language-based node **icon** overlay (py/ts/go/rs/java/md glyphs)
+
+**Interaction:**
+- Click node → blast-radius overlay (affected nodes turn red), side panel shows
+  file path, community, PageRank, top exports, callers count
+- Hover edge → tooltip: edge type + evidence label
+- Filter panel: by subproject, language, community ID
+- Search box: type to highlight matching nodes
+- `relic viz` → opens in default browser (writes tmp HTML)
+- `relic viz --out graph.html` → saves portable file
+
+### 10d — `relic centrality`
+
+Graph weight table — pure networkx, no extra deps.
+
+**Metrics per file node:**
+- **PageRank** — structural importance (high = many important files depend on it)
+- **Betweenness** — bridge score (high = sits between many communities; riskiest to change)
+- **In-degree** — raw dependent count
+- **Out-degree** — raw dependency count
+
+CLI: `relic centrality` prints TOON table sorted by PageRank desc.
+`relic centrality --top N` limits output.
+`relic centrality --by betweenness` changes sort key.
+Agents can use this to identify load-bearing files before refactoring.
 
 ---
 

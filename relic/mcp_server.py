@@ -207,7 +207,8 @@ async def list_tools() -> list[Tool]:
                 "editing any unfamiliar file. Ambiguous symbol → TOON candidates "
                 "list; re-query with full file path. Supports space-separated "
                 "targets for batch query and Class.method dotted notation. "
-                "Shorthands: 'impact:TARGET' for blast-radius, 'A->B' for shortest path, 'cycles' for circular dependency detection."
+                "Shorthands: 'impact:TARGET' for blast-radius, 'A->B' for shortest path, "
+                "'cycles' for circular dependency detection."
             ),
             inputSchema={
                 "type": "object",

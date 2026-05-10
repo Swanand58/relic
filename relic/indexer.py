@@ -7,11 +7,16 @@ No LLM involved. Extracts:
 - Define edges from files to their symbols
 - Extends edges between symbols (Python + TypeScript)
 - Test mapping edges (tested_by / tests) via naming conventions
+- Community IDs on file nodes (Louvain clustering)
 
 Languages supported:
-- Python     — stdlib ast (accurate)
-- TypeScript / JS / TSX / JSX — regex (covers 90% of real-world code)
-- Other      — file nodes only, no symbol extraction
+- Python     — stdlib ast (accurate)                   evidence: ast
+- TypeScript / JS / TSX / JSX — regex                 evidence: regex
+- Go, Rust, Java, C#, Kotlin, Scala, PHP, Swift        evidence: treesitter
+- Markdown   — H1/H2 headings as symbols
+- OpenAPI YAML/JSON — HTTP endpoints as symbols
+- JSON Schema — definitions/$defs as symbols
+- pyproject.toml / package.json — package + scripts
 
 Graph schema
 ------------
@@ -23,23 +28,24 @@ Node attributes:
     ntype    : "file" | "symbol"
     --- file nodes ---
     path     : relative path (same as node ID)
-    language : "python" | "typescript" | "javascript" | "other"
+    language : "python" | "typescript" | "javascript" | "go" | "rust" | ...
     subproject: subproject name from relic.yaml (or "" if unlabeled)
+    community : integer community ID from Louvain clustering
     --- symbol nodes ---
     name     : symbol name
-    stype    : "class" | "function" | "interface" | "type" | "variable"
+    stype    : "class" | "function" | "interface" | "type" | "variable" | ...
     path     : file that defines this symbol
     line     : line number (0 if unknown)
     signature: parameter/return-type signature (empty string if unavailable)
 
 Edge types:
-    imports   : file   → file    (file A imports from file B)
-    defines   : file   → symbol  (file A defines symbol S)
-    extends   : symbol → symbol  (class A extends class B)
-    uses      : file   → symbol  (file A references symbol S from another file)
-    calls     : symbol → symbol  (function A calls function B)
-    tested_by : file   → file    (source file → its test file)
-    tests     : file   → file    (test file → the source it tests)
+    imports   : file   → file    evidence: ast | treesitter | regex
+    defines   : file   → symbol
+    extends   : symbol → symbol  evidence: ast | treesitter | regex
+    uses      : file   → symbol  evidence: ast | treesitter | regex
+    calls     : symbol → symbol  evidence: ast | treesitter | regex
+    tested_by : file   → file    evidence: convention
+    tests     : file   → file    evidence: convention
 """
 
 import ast
@@ -96,6 +102,23 @@ LANGUAGE_MAP = {
     ".go": "go",
     ".rs": "rust",
     ".java": "java",
+    ".cs": "csharp",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".php": "php",
+    ".swift": "swift",
+    ".md": "markdown",
+    ".mdx": "markdown",
+    ".yaml": "data",
+    ".yml": "data",
+    ".json": "data",
+}
+
+# Files matched by name (not extension) for doc indexing
+_DOC_NAME_MAP: dict[str, str] = {
+    "pyproject.toml": "pyproject",
+    "package.json": "packagejson",
 }
 
 MAX_FILE_BYTES = 200_000
@@ -697,7 +720,8 @@ def _collect_source_files(project_root: Path, subprojects: dict | None = None) -
             skipped_dirs.update(hit)
             continue
 
-        if p.suffix not in LANGUAGE_MAP:
+        # Accept name-mapped doc files before checking extension
+        if p.name not in _DOC_NAME_MAP and p.suffix not in LANGUAGE_MAP:
             continue
         if p.stat().st_size > MAX_FILE_BYTES:
             continue
@@ -820,15 +844,15 @@ def _add_test_mapping(G: nx.DiGraph) -> None:
         if _is_test_file(node):
             for candidate in _source_candidate_names(node):
                 if candidate in file_nodes and (candidate, node) not in already_paired:
-                    G.add_edge(candidate, node, etype="tested_by")
-                    G.add_edge(node, candidate, etype="tests")
+                    G.add_edge(candidate, node, etype="tested_by", evidence="convention")
+                    G.add_edge(node, candidate, etype="tests", evidence="convention")
                     already_paired.add((candidate, node))
                     break
         else:
             for candidate in _test_candidate_names(node):
                 if candidate in file_nodes and (node, candidate) not in already_paired:
-                    G.add_edge(node, candidate, etype="tested_by")
-                    G.add_edge(candidate, node, etype="tests")
+                    G.add_edge(node, candidate, etype="tested_by", evidence="convention")
+                    G.add_edge(candidate, node, etype="tests", evidence="convention")
                     already_paired.add((node, candidate))
                     break
 
@@ -842,6 +866,23 @@ def _safe_mtime(path: Path) -> float:
         return path.stat().st_mtime
     except OSError:
         return 0.0
+
+
+_OPENAPI_KEYS = frozenset(("swagger", "openapi"))
+
+
+def _looks_like_openapi(source: str) -> bool:
+    """Quick heuristic: does this file look like an OpenAPI/Swagger doc?"""
+    head = source[:2000]
+    has_root = any(k in head for k in ("swagger:", "openapi:", '"swagger":', '"openapi":'))
+    has_paths = "paths:" in head or '"paths"' in head
+    return has_root and has_paths
+
+
+def _looks_like_jsonschema(source: str) -> bool:
+    """Quick heuristic: does this file look like a JSON Schema?"""
+    head = source[:1000]
+    return '"$schema"' in head or ('"definitions"' in head and '"properties"' in head)
 
 
 def _analyse_one_file(
@@ -864,6 +905,21 @@ def _analyse_one_file(
         imports, symbols, imported_names, raw_calls = _analyse_python(source, rel_path, project_root)
     elif lang in ("typescript", "javascript"):
         imports, symbols, imported_names, raw_calls = _analyse_typescript(source, rel_path, project_root)
+    elif lang == "markdown":
+        from relic.parsers.docs import analyse_markdown
+
+        ar = analyse_markdown(source, rel_path, abs_path.parent)
+        imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+    elif lang == "pyproject":
+        from relic.parsers.docs import analyse_pyproject
+
+        ar = analyse_pyproject(source, rel_path, abs_path.parent)
+        imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+    elif lang == "packagejson":
+        from relic.parsers.docs import analyse_packagejson
+
+        ar = analyse_packagejson(source, rel_path, abs_path.parent)
+        imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
     else:
         from relic.parsers.base import get_parser
 
@@ -872,7 +928,19 @@ def _analyse_one_file(
             ar = ts_parser.analyse(source, rel_path, project_root)
             imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
         else:
-            imports, symbols, imported_names, raw_calls = [], [], [], []
+            # Detect OpenAPI by content: YAML/JSON files with paths: key or swagger/openapi root key
+            if abs_path.suffix in (".yaml", ".yml", ".json") and _looks_like_openapi(source):
+                from relic.parsers.docs import analyse_openapi
+
+                ar = analyse_openapi(source, rel_path, abs_path.parent)
+                imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+            elif abs_path.suffix == ".json" and _looks_like_jsonschema(source):
+                from relic.parsers.docs import analyse_jsonschema
+
+                ar = analyse_jsonschema(source, rel_path, abs_path.parent)
+                imports, symbols, imported_names, raw_calls = ar.imports, ar.symbols, ar.imported_names, ar.calls
+            else:
+                imports, symbols, imported_names, raw_calls = [], [], [], []
 
     return {
         "imports": imports,
@@ -978,44 +1046,95 @@ def _resolve_cross_file_edges(G: nx.DiGraph) -> None:
         if d.get("ntype") == "symbol":
             syms_by_name.setdefault(d["name"], []).append(n)
 
+    # Map language → evidence label for this file's edges
+    _LANG_EVIDENCE: dict[str, str] = {
+        "python": "ast",
+        "typescript": "regex",
+        "javascript": "regex",
+        "go": "treesitter",
+        "rust": "treesitter",
+        "java": "treesitter",
+        "csharp": "treesitter",
+        "kotlin": "treesitter",
+        "scala": "treesitter",
+        "php": "treesitter",
+        "swift": "treesitter",
+    }
+
     # imports + uses (file → file, file → symbol)
     for f in file_nodes:
         d = G.nodes[f]
+        evidence = _LANG_EVIDENCE.get(d.get("language", ""), "regex")
         for imp in d.get("file_imports", []):
             if imp in file_nodes and imp != f:
-                G.add_edge(f, imp, etype="imports")
+                G.add_edge(f, imp, etype="imports", evidence=evidence)
         for target_file, sym_name in d.get("file_imported_names", []):
             sid = f"{sym_name}@{target_file}"
             if sid in G.nodes:
-                G.add_edge(f, sid, etype="uses")
+                G.add_edge(f, sid, etype="uses", evidence=evidence)
 
     # extends (symbol → symbol) and calls (symbol → symbol)
     for n, d in list(G.nodes(data=True)):
         if d.get("ntype") != "symbol":
             continue
         own_file = d.get("path", "")
+        evidence = _LANG_EVIDENCE.get(G.nodes.get(own_file, {}).get("language", ""), "regex")
 
         parent_name = d.get("extends_name") or ""
         if parent_name:
             local_sid = f"{parent_name}@{own_file}"
             if local_sid in G.nodes:
-                G.add_edge(n, local_sid, etype="extends")
+                G.add_edge(n, local_sid, etype="extends", evidence=evidence)
             else:
                 for cand in syms_by_name.get(parent_name, []):
-                    G.add_edge(n, cand, etype="extends")
+                    G.add_edge(n, cand, etype="extends", evidence=evidence)
                     break
 
         for callee_name in d.get("raw_calls", []):
             local_sid = f"{callee_name}@{own_file}"
             if local_sid in G.nodes:
-                G.add_edge(n, local_sid, etype="calls")
+                G.add_edge(n, local_sid, etype="calls", evidence=evidence)
                 continue
             for cand in syms_by_name.get(callee_name, []):
                 if G.has_edge(own_file, cand) and G.edges[own_file, cand].get("etype") == "uses":
-                    G.add_edge(n, cand, etype="calls")
+                    G.add_edge(n, cand, etype="calls", evidence=evidence)
                     break
 
     _add_test_mapping(G)
+
+
+def _compute_communities(G: nx.DiGraph) -> None:
+    """Assign community IDs to file nodes using Louvain clustering.
+
+    Stores integer ``community`` attribute on every file node.  Communities
+    are numbered 0..N-1; files not in any discovered community get -1.
+    Also stores the community map on G.graph['communities'] as {community_id: [file_paths]}.
+    """
+    file_nodes = [n for n, d in G.nodes(data=True) if d.get("ntype") == "file"]
+    if not file_nodes:
+        return
+
+    # Build undirected subgraph of file→file edges only (imports + tested_by)
+    file_set = set(file_nodes)
+    ug = nx.Graph()
+    ug.add_nodes_from(file_nodes)
+    for u, v, d in G.edges(data=True):
+        if u in file_set and v in file_set and d.get("etype") in ("imports", "tested_by"):
+            ug.add_edge(u, v)
+
+    try:
+        partitions = list(nx.community.louvain_communities(ug, seed=42))
+    except Exception:
+        return
+
+    community_map: dict[int, list[str]] = {}
+    for cid, members in enumerate(partitions):
+        community_map[cid] = sorted(members)
+        for node in members:
+            if node in G.nodes:
+                G.nodes[node]["community"] = cid
+
+    G.graph["communities"] = community_map
 
 
 def _build_literal_index(G: nx.DiGraph) -> None:
@@ -1045,12 +1164,13 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
 
     for abs_path, subproject in files:
         rel = _posix_rel(abs_path, project_root)
-        lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
+        lang = _DOC_NAME_MAP.get(abs_path.name) or LANGUAGE_MAP.get(abs_path.suffix, "other")
         mtime = _safe_mtime(abs_path)
         data = _analyse_one_file(abs_path, rel, lang, project_root)
         _apply_file_data(G, rel, lang, subproject, mtime, data)
 
     _resolve_cross_file_edges(G)
+    _compute_communities(G)
     _build_literal_index(G)
     return G, skip_stats
 
@@ -1247,12 +1367,13 @@ def incremental_index(
 
     for rel in touched:
         abs_path, subproject, mtime = current[rel]
-        lang = LANGUAGE_MAP.get(abs_path.suffix, "other")
+        lang = _DOC_NAME_MAP.get(abs_path.name) or LANGUAGE_MAP.get(abs_path.suffix, "other")
         data = _analyse_one_file(abs_path, rel, lang, project_root)
         _apply_file_data(G, rel, lang, subproject, mtime, data)
 
     if touched or deleted:
         _resolve_cross_file_edges(G)
+        _compute_communities(G)
         _build_literal_index(G)
         save_graph(G, knowledge_dir)
 

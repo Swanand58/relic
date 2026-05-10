@@ -206,7 +206,8 @@ async def list_tools() -> list[Tool]:
                 "signatures, neighbors, callers (up to `depth` hops). Call before "
                 "editing any unfamiliar file. Ambiguous symbol → TOON candidates "
                 "list; re-query with full file path. Supports space-separated "
-                "targets for batch query and Class.method dotted notation."
+                "targets for batch query and Class.method dotted notation. "
+                "Shorthands: 'impact:TARGET' for blast-radius, 'A->B' for shortest path."
             ),
             inputSchema={
                 "type": "object",
@@ -374,6 +375,33 @@ def _handle_query(args: dict) -> list[TextContent]:
 
     if not target:
         return _wrap("Error: target is required.", call_type="query")
+
+    # Shorthand: "impact:TARGET" → blast-radius analysis
+    if target.startswith("impact:"):
+        inner = target[len("impact:"):].strip()
+        G, err = _load_or_error(KNOWLEDGE_DIR)
+        if err:
+            return _wrap(err, call_type="query")
+        from relic.impact import compute_impact, render_impact_toon
+
+        result = compute_impact(G, inner, max_depth=depth)
+        if result is None:
+            return _wrap(f"Not found: '{inner}'. Use relic_search to explore.", call_type="query")
+        return _wrap(render_impact_toon(inner, result), call_type="query")
+
+    # Shorthand: "A->B" → shortest path
+    if "->" in target and not target.startswith("-"):
+        parts = target.split("->", 1)
+        src, dst = parts[0].strip(), parts[1].strip()
+        G, err = _load_or_error(KNOWLEDGE_DIR)
+        if err:
+            return _wrap(err, call_type="query")
+        from relic.impact import compute_path, render_path_toon
+
+        result = compute_path(G, src, dst)
+        if result is None:
+            return _wrap(f"No path found between '{src}' and '{dst}'.", call_type="query")
+        return _wrap(render_path_toon(src, dst, result), call_type="query")
 
     G, err = _load_or_error(KNOWLEDGE_DIR)
     if err:

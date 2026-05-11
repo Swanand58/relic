@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-11
+
+### Added
+
+- **`relic centrality`**: PageRank + betweenness centrality on the file dependency graph. Pure-Python power iteration — no scipy/numpy required. Identifies load-bearing files before refactoring.
+- **`relic viz`**: self-contained D3.js v7 force-directed knowledge graph in the browser. Node size = PageRank, color = community (Nord palette), edge opacity = evidence quality. Click node → blast-radius overlay; double-click → 2-hop focus mode with auto-zoom; filter by language/community/subproject with auto-pan.
+- **`relic cycles`**: circular dependency detection via `nx.simple_cycles()`. Chains shown shortest first. MCP shorthand: `relic_query "cycles"`.
+- **`relic uninit <agent|all>`**: removes relic MCP registration and instruction block — reverses `relic --init`.
+- **`relic uninstall [--yes]`**: full project cleanup — uninits all agents, removes `.knowledge/`, then uninstalls `relic-graph` via pip or uv.
+- **`relic benchmark --vs ripgrep`**: compares `relic_query` vs ripgrep token cost for a symbol search, with verdict based on codebase size.
+- **Multi-file audit sampling**: `relic audit` now samples top-5 files by import count instead of 1, giving a representative savings estimate.
+- **Small codebase advisory**: `relic index` warns when codebase < 40 files and suggests `relic uninit`.
+- **MCP config fix**: `relic --init claude` now correctly writes to `.mcp.json` (project-scope). The previous target `.claude/settings.json` was silently ignored by Claude Code for MCP server registration.
+
+### Fixed
+
+- **`nx.pagerank` numpy dependency**: replaced with pure-Python power iteration — no scipy or numpy required.
+
+## [0.7.0] - 2026-05-10
+
+### Added
+
+- **`relic centrality`**: PageRank + betweenness centrality weights on the file dependency graph (released as part of Phase 10, consolidated into 0.8.0).
+- **`relic viz`**: interactive D3.js knowledge graph (released as part of Phase 10, consolidated into 0.8.0).
+
 ## [0.6.0] - 2026-05-09
 
 ### Added

@@ -140,8 +140,17 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
     # Only sample real source-code files — doc/config files have no import
     # relationships so their TOON savings are meaningless or misleading.
     _SOURCE_LANGS = {
-        "python", "typescript", "javascript", "go", "rust",
-        "java", "c#", "kotlin", "scala", "php", "swift",
+        "python",
+        "typescript",
+        "javascript",
+        "go",
+        "rust",
+        "java",
+        "c#",
+        "kotlin",
+        "scala",
+        "php",
+        "swift",
     }
     _TEST_PATTERNS = ("test_", "_test.", "/test/", "/tests/", "/spec/", "_spec.")
 
@@ -158,9 +167,7 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
     ]
     # Fall back to all non-test files if language metadata is missing
     file_nodes = source_nodes or [
-        n
-        for n, d in G.nodes(data=True)
-        if d.get("ntype") == "file" and (project_root / n).exists() and not _is_test(n)
+        n for n, d in G.nodes(data=True) if d.get("ntype") == "file" and (project_root / n).exists() and not _is_test(n)
     ]
     if not file_nodes:
         return None

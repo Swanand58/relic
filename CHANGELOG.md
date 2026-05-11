@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-05-11
+
+### Fixed
+
+- **`relic benchmark --vs ripgrep` verdict**: no longer contradicts itself — shows "relic wins" when token savings are positive regardless of codebase size; small codebase shown as a note, not an override.
+- **`relic audit` negative savings**: explains why net savings can be negative (hub files pull large subgraphs) instead of showing a confusing red number with no context.
+
+### Added
+
+- **CI release guard**: PRs that bump `pyproject.toml` version without updating `CHANGELOG.md` now fail CI with a clear error.
+- **Smoke tests**: `relic centrality`, `relic cycles`, `relic impact`, `relic diff`, and `relic viz` added to the e2e CI smoke suite.
+
 ## [0.8.0] - 2026-05-11
 
 ### Added

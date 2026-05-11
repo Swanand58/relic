@@ -843,7 +843,11 @@ def _children_of_type(node, type_name: str):
 
 
 def register_all() -> None:
-    """Register all tree-sitter parsers."""
+    """Register all tree-sitter parsers. No-op if tree-sitter-language-pack not installed."""
+    try:
+        import tree_sitter_language_pack as _  # noqa: F401
+    except ImportError:
+        return
     register(GoParser())
     register(RustParser())
     register(JavaParser())

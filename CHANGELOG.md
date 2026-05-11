@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-11
+
+### Fixed
+
+- **Treesitter optional import crash**: `relic index` no longer crashes with `ModuleNotFoundError: No module named 'tree_sitter_language_pack'` on codebases containing C#, Kotlin, Scala, PHP, or Swift files when the `relic-graph[treesitter]` extra is not installed. Parser registration is now silently skipped if the package is absent.
+
 ## [0.8.1] - 2026-05-11
 
 ### Fixed

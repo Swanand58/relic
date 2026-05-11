@@ -354,10 +354,10 @@ def run_rg_benchmark(symbol: str, project_root: Path, knowledge_dir: Path) -> No
     s.add_row("rg time", f"[dim]{rg_ms:.1f}ms[/dim]")
     s.add_row("relic time", f"[dim]{relic_ms:.1f}ms[/dim]")
     s.add_row("codebase size", f"[dim]{verdict} ({fit.get('files', '?')} files)[/dim]")
-    if verdict == "small":
-        s.add_row("verdict", "[yellow]small codebase — ripgrep may be sufficient here[/yellow]")
-    elif savings > 0:
-        s.add_row("verdict", "[green]relic saves tokens AND surfaces hidden callers[/green]")
+    if savings > 0:
+        s.add_row("verdict", "[green]relic wins — fewer tokens AND surfaces hidden callers ripgrep can't[/green]")
+        if verdict == "small":
+            s.add_row("note", "[dim]codebase is small — agent could also read all files directly[/dim]")
     else:
         s.add_row("verdict", "[yellow]similar token cost — relic adds caller graph, rg adds line numbers[/yellow]")
     console.print(s)

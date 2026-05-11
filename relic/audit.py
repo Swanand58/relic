@@ -280,11 +280,14 @@ def render_audit(audit: dict, console) -> None:
         )
         pct = sample["savings_pct"]
         sign = "+" if pct >= 0 else ""
-        color = "green" if pct > 0 else "red"
+        color = "green" if pct > 0 else "yellow"
+        savings_str = f"[{color}]~{sample['total_savings']:,} tokens ({sign}{pct}%)[/]"
+        if pct <= 0:
+            savings_str += f"  [{style.DIM}]← hub files pull large subgraphs; value is in caller graph[/]"
         console.print(
             style.kv(
                 "net savings",
-                f"[{color}]~{sample['total_savings']:,} tokens ({sign}{pct}%)[/]",
+                savings_str,
                 key_width=kw,
             )
         )

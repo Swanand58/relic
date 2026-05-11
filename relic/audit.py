@@ -139,7 +139,10 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
 
     # Only sample real source-code files — doc/config files have no import
     # relationships so their TOON savings are meaningless or misleading.
-    _SOURCE_LANGS = {"python", "typescript", "javascript", "go", "rust", "java", "c#", "kotlin", "scala", "php", "swift"}
+    _SOURCE_LANGS = {
+        "python", "typescript", "javascript", "go", "rust",
+        "java", "c#", "kotlin", "scala", "php", "swift",
+    }
     _TEST_PATTERNS = ("test_", "_test.", "/test/", "/tests/", "/spec/", "_spec.")
 
     def _is_test(path: str) -> bool:

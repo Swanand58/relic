@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-05-11
+
+### Fixed
+
+- **`relic audit` sampling**: switched from in-degree (hub files) to out-degree (files that import many things) so savings estimates reflect where relic actually helps most. Hub files at depth=2 produced inflated TOON sizes that made savings look negative on large codebases like ansible.
+- **`relic audit` depth mismatch**: sample depth changed from 2 to 1, aligning the TOON token count with the manual baseline (focus file + direct imports). Depth=2 unfairly inflated the TOON without a matching increase in the manual comparison.
+
 ## [0.8.2] - 2026-05-11
 
 ### Fixed

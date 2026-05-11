@@ -37,9 +37,10 @@ TAX_WARN = 2000  # ⚠ yellow above this
 # Above TAX_WARN → ✗ red. Means relic is contributing meaningfully to the
 # kind of overhead the article called out — time to trim.
 
-# Default depth used when sampling a typical relic_query response. Matches
-# the default in the MCP tool itself.
-SAMPLE_DEPTH = 2
+# Depth=1 matches the most common relic_query usage and aligns the TOON
+# token count with the manual baseline (focus file + direct imports only).
+# Depth=2 explodes on hub files and makes the comparison unfair.
+SAMPLE_DEPTH = 1
 
 
 def _instruction_tokens() -> int:
@@ -136,24 +137,82 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
     except FileNotFoundError:
         return None
 
-    file_nodes = [n for n, d in G.nodes(data=True) if d.get("ntype") == "file" and (project_root / n).exists()]
+    # Only sample real source-code files — doc/config files have no import
+    # relationships so their TOON savings are meaningless or misleading.
+    _SOURCE_LANGS = {
+        "python",
+        "typescript",
+        "javascript",
+        "go",
+        "rust",
+        "java",
+        "c#",
+        "kotlin",
+        "scala",
+        "php",
+        "swift",
+    }
+    _TEST_PATTERNS = ("test_", "_test.", "/test/", "/tests/", "/spec/", "_spec.")
+
+    def _is_test(path: str) -> bool:
+        return any(pat in path for pat in _TEST_PATTERNS)
+
+    source_nodes = [
+        n
+        for n, d in G.nodes(data=True)
+        if d.get("ntype") == "file"
+        and (project_root / n).exists()
+        and not _is_test(n)
+        and d.get("language", "").lower() in _SOURCE_LANGS
+    ]
+    # Fall back to all non-test files if language metadata is missing
+    file_nodes = source_nodes or [
+        n for n, d in G.nodes(data=True) if d.get("ntype") == "file" and (project_root / n).exists() and not _is_test(n)
+    ]
     if not file_nodes:
         return None
 
-    # Pick top files by in-degree (most depended-upon) — most representative for agents
-    by_indegree = sorted(file_nodes, key=lambda n: G.in_degree(n), reverse=True)
-    # Spread sample: take top third, middle third, bottom — avoid all-barrel bias
-    total = len(by_indegree)
+    # Count only import-type out-edges (not defines edges) — G.out_degree()
+    # includes file→symbol defines edges which inflate scores for files with
+    # many symbols but few imports.
+    import_outdegree: dict[str, int] = {n: 0 for n in file_nodes}
+    for u, v, d in G.edges(data=True):
+        if d.get("etype") == "imports" and u in import_outdegree:
+            import_outdegree[u] += 1
+
+    # Sample by import out-degree. Files that import many things benefit most
+    # from relic — agent would need to read all those imports manually.
+    # Skip files where manual baseline < 500 tokens (too small, noisy %).
+    MIN_MANUAL_TOKENS = 500
+    by_outdegree = sorted(
+        [n for n in file_nodes if import_outdegree[n] > 0],
+        key=lambda n: import_outdegree[n],
+        reverse=True,
+    )
+    # Fall back to all source nodes if nothing has import edges (e.g. tiny codebases)
+    if not by_outdegree:
+        by_outdegree = file_nodes
+
+    # Spread evenly: high / mid / low importers for a representative mix.
+    # Prefer files whose on-disk content is >= MIN_MANUAL_TOKENS — too-small
+    # files produce noisy savings percentages. Fall back without the filter
+    # if the codebase is tiny and everything is under the threshold.
+    total = len(by_outdegree)
     candidates: list[str] = []
     step = max(1, total // (n_samples * 2))
     seen: set[str] = set()
     for i in range(0, total, step):
         if len(candidates) >= n_samples:
             break
-        node = by_indegree[i]
+        node = by_outdegree[i]
         if node not in seen:
-            candidates.append(node)
+            if _tokens(_read_file(project_root / node)) >= MIN_MANUAL_TOKENS:
+                candidates.append(node)
             seen.add(node)
+
+    # Fallback: if token-size filter removed everything, use top out-degree nodes
+    if not candidates:
+        candidates = by_outdegree[:n_samples]
 
     results = [r for c in candidates if (r := _query_one(G, project_root, c)) is not None]
     if not results:

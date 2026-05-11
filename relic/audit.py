@@ -37,9 +37,10 @@ TAX_WARN = 2000  # ⚠ yellow above this
 # Above TAX_WARN → ✗ red. Means relic is contributing meaningfully to the
 # kind of overhead the article called out — time to trim.
 
-# Default depth used when sampling a typical relic_query response. Matches
-# the default in the MCP tool itself.
-SAMPLE_DEPTH = 2
+# Depth=1 matches the most common relic_query usage and aligns the TOON
+# token count with the manual baseline (focus file + direct imports only).
+# Depth=2 explodes on hub files and makes the comparison unfair.
+SAMPLE_DEPTH = 1
 
 
 def _instruction_tokens() -> int:
@@ -140,17 +141,27 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
     if not file_nodes:
         return None
 
-    # Pick top files by in-degree (most depended-upon) — most representative for agents
-    by_indegree = sorted(file_nodes, key=lambda n: G.in_degree(n), reverse=True)
-    # Spread sample: take top third, middle third, bottom — avoid all-barrel bias
-    total = len(by_indegree)
+    # Sample by out-degree (files that import many things). These are where
+    # relic saves most: agent would need to read all those imports manually.
+    # In-degree hub files are poor subjects — their TOON explodes even at depth=1.
+    by_outdegree = sorted(
+        [n for n in file_nodes if G.out_degree(n) > 0],
+        key=lambda n: G.out_degree(n),
+        reverse=True,
+    )
+    # Fall back to all file nodes if nothing has out-edges (e.g. tiny codebases)
+    if not by_outdegree:
+        by_outdegree = file_nodes
+
+    # Spread evenly: high / mid / low importers for a representative mix
+    total = len(by_outdegree)
     candidates: list[str] = []
     step = max(1, total // (n_samples * 2))
     seen: set[str] = set()
     for i in range(0, total, step):
         if len(candidates) >= n_samples:
             break
-        node = by_indegree[i]
+        node = by_outdegree[i]
         if node not in seen:
             candidates.append(node)
             seen.add(node)

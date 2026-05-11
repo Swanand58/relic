@@ -1137,6 +1137,21 @@ def _compute_communities(G: nx.DiGraph) -> None:
     G.graph["communities"] = community_map
 
 
+def _annotate_codebase_fit(G: nx.DiGraph) -> None:
+    """Annotate G.graph with codebase size verdict for --uninit advisory."""
+    file_nodes = [n for n, d in G.nodes(data=True) if d.get("ntype") == "file"]
+    n_files = len(file_nodes)
+    # Rough token estimate: average 2 KB per file ÷ 4 chars/token = 500 tokens/file
+    est_tokens = n_files * 500
+    if n_files < 40 or est_tokens < 60_000:
+        verdict = "small"
+    elif n_files < 150:
+        verdict = "medium"
+    else:
+        verdict = "large"
+    G.graph["codebase_fit"] = {"files": n_files, "est_tokens": est_tokens, "verdict": verdict}
+
+
 def _build_literal_index(G: nx.DiGraph) -> None:
     """Build inverted string-literal index on G.graph['string_literals'].
 
@@ -1172,6 +1187,7 @@ def build_graph(project_root: Path, subprojects: dict | None = None) -> tuple[nx
     _resolve_cross_file_edges(G)
     _compute_communities(G)
     _build_literal_index(G)
+    _annotate_codebase_fit(G)
     return G, skip_stats
 
 
@@ -1375,6 +1391,7 @@ def incremental_index(
         _resolve_cross_file_edges(G)
         _compute_communities(G)
         _build_literal_index(G)
+        _annotate_codebase_fit(G)
         save_graph(G, knowledge_dir)
 
     # Always refresh the sidecar so it tracks what's actually on disk now,

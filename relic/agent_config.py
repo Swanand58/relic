@@ -175,6 +175,62 @@ def _wrap_block(content: str) -> str:
     return f"{RELIC_BLOCK_START}\n{content}\n{RELIC_BLOCK_END}\n"
 
 
+def _remove_block(file_path: Path) -> str:
+    """Remove the relic block from a file. Returns 'removed' or 'not_found'."""
+    if not file_path.exists():
+        return "not_found"
+    existing = file_path.read_text(encoding="utf-8")
+    if RELIC_BLOCK_START not in existing:
+        return "not_found"
+    start = existing.index(RELIC_BLOCK_START)
+    end = existing.index(RELIC_BLOCK_END) + len(RELIC_BLOCK_END)
+    updated = existing[:start].rstrip("\n") + existing[end:].lstrip("\n")
+    if updated.strip():
+        file_path.write_text(updated, encoding="utf-8")
+    else:
+        file_path.unlink()
+    return "removed"
+
+
+def _remove_mcp_config(agent_key: str, project_root: Path) -> str:
+    """Remove the relic MCP server entry from the agent's MCP config file."""
+    agent = AGENTS.get(agent_key, {})
+    if "mcp_config" not in agent:
+        return "not_applicable"
+    config_path = project_root / agent["mcp_config"]
+    if not config_path.exists():
+        return "not_found"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return "not_found"
+    servers = config.get(agent["mcp_key"], {})
+    if "relic" not in servers:
+        return "not_found"
+    del servers["relic"]
+    config[agent["mcp_key"]] = servers
+    if not servers:
+        del config[agent["mcp_key"]]
+    if config:
+        config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    else:
+        config_path.unlink()
+    return "removed"
+
+
+def uninit_agent(agent_key: str, project_root: Path) -> None:
+    """Remove relic instructions and MCP registration for a specific agent."""
+    agent = AGENTS[agent_key]
+    target = project_root / agent["path"]
+    action = _remove_block(target)
+    console.print(f"[green]✓[/green] [bold]{agent['name']}[/bold] — instructions {action} [dim]{target}[/dim]")
+
+    if "mcp_config" in agent:
+        mcp_action = _remove_mcp_config(agent_key, project_root)
+        config_path = project_root / agent["mcp_config"]
+        console.print(f"[green]✓[/green] [bold]{agent['name']} MCP[/bold] — {mcp_action} [dim]{config_path}[/dim]")
+
+
 def _upsert_block(file_path: Path, content: str) -> str:
     """Insert or replace the relic block in a file. Returns 'created' or 'updated'."""
     block = _wrap_block(content)

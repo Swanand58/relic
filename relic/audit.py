@@ -137,23 +137,56 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
     except FileNotFoundError:
         return None
 
-    file_nodes = [n for n, d in G.nodes(data=True) if d.get("ntype") == "file" and (project_root / n).exists()]
+    # Only sample real source-code files — doc/config files have no import
+    # relationships so their TOON savings are meaningless or misleading.
+    _SOURCE_LANGS = {"python", "typescript", "javascript", "go", "rust", "java", "c#", "kotlin", "scala", "php", "swift"}
+    _TEST_PATTERNS = ("test_", "_test.", "/test/", "/tests/", "/spec/", "_spec.")
+
+    def _is_test(path: str) -> bool:
+        return any(pat in path for pat in _TEST_PATTERNS)
+
+    source_nodes = [
+        n
+        for n, d in G.nodes(data=True)
+        if d.get("ntype") == "file"
+        and (project_root / n).exists()
+        and not _is_test(n)
+        and d.get("language", "").lower() in _SOURCE_LANGS
+    ]
+    # Fall back to all non-test files if language metadata is missing
+    file_nodes = source_nodes or [
+        n
+        for n, d in G.nodes(data=True)
+        if d.get("ntype") == "file" and (project_root / n).exists() and not _is_test(n)
+    ]
     if not file_nodes:
         return None
 
-    # Sample by out-degree (files that import many things). These are where
-    # relic saves most: agent would need to read all those imports manually.
-    # In-degree hub files are poor subjects — their TOON explodes even at depth=1.
+    # Count only import-type out-edges (not defines edges) — G.out_degree()
+    # includes file→symbol defines edges which inflate scores for files with
+    # many symbols but few imports.
+    import_outdegree: dict[str, int] = {n: 0 for n in file_nodes}
+    for u, v, d in G.edges(data=True):
+        if d.get("etype") == "imports" and u in import_outdegree:
+            import_outdegree[u] += 1
+
+    # Sample by import out-degree. Files that import many things benefit most
+    # from relic — agent would need to read all those imports manually.
+    # Skip files where manual baseline < 500 tokens (too small, noisy %).
+    MIN_MANUAL_TOKENS = 500
     by_outdegree = sorted(
-        [n for n in file_nodes if G.out_degree(n) > 0],
-        key=lambda n: G.out_degree(n),
+        [n for n in file_nodes if import_outdegree[n] > 0],
+        key=lambda n: import_outdegree[n],
         reverse=True,
     )
-    # Fall back to all file nodes if nothing has out-edges (e.g. tiny codebases)
+    # Fall back to all source nodes if nothing has import edges (e.g. tiny codebases)
     if not by_outdegree:
         by_outdegree = file_nodes
 
-    # Spread evenly: high / mid / low importers for a representative mix
+    # Spread evenly: high / mid / low importers for a representative mix.
+    # Prefer files whose on-disk content is >= MIN_MANUAL_TOKENS — too-small
+    # files produce noisy savings percentages. Fall back without the filter
+    # if the codebase is tiny and everything is under the threshold.
     total = len(by_outdegree)
     candidates: list[str] = []
     step = max(1, total // (n_samples * 2))
@@ -163,8 +196,13 @@ def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -
             break
         node = by_outdegree[i]
         if node not in seen:
-            candidates.append(node)
+            if _tokens(_read_file(project_root / node)) >= MIN_MANUAL_TOKENS:
+                candidates.append(node)
             seen.add(node)
+
+    # Fallback: if token-size filter removed everything, use top out-degree nodes
+    if not candidates:
+        candidates = by_outdegree[:n_samples]
 
     results = [r for c in candidates if (r := _query_one(G, project_root, c)) is not None]
     if not results:

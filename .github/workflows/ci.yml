@@ -53,6 +53,37 @@ jobs:
       - name: Pytest
         run: uv run pytest
 
+  release-guard:
+    name: release guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check CHANGELOG updated when version bumped
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+
+          VERSION_CHANGED=$(git diff "$BASE" "$HEAD" -- pyproject.toml \
+            | grep '^+version' | grep -v '^+++' || true)
+
+          if [ -z "$VERSION_CHANGED" ]; then
+            echo "version unchanged — no CHANGELOG requirement"
+            exit 0
+          fi
+
+          echo "version bumped: $VERSION_CHANGED"
+
+          CHANGELOG_CHANGED=$(git diff "$BASE" "$HEAD" -- CHANGELOG.md || true)
+          if [ -z "$CHANGELOG_CHANGED" ]; then
+            echo "::error file=CHANGELOG.md::Version was bumped in pyproject.toml but CHANGELOG.md was not updated. Add an entry under [Unreleased] before releasing."
+            exit 1
+          fi
+
+          echo "CHANGELOG updated — OK"
+
   smoke:
     name: smoke (e2e CLI)
     runs-on: ubuntu-latest
@@ -93,3 +124,13 @@ jobs:
         run: uv run relic audit
       - name: relic benchmark
         run: uv run relic benchmark relic/audit.py
+      - name: relic centrality
+        run: uv run relic centrality --top 5
+      - name: relic cycles
+        run: uv run relic cycles
+      - name: relic impact
+        run: uv run relic impact relic/audit.py
+      - name: relic diff
+        run: uv run relic diff
+      - name: relic viz (save to file)
+        run: uv run relic viz --out /tmp/relic_viz.html

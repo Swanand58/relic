@@ -571,6 +571,85 @@ def cycles_cmd(
     err_console.print(style.dim(f"cycles: {len(cycles)} found"))
 
 
+@app.command(name="uninit")
+def uninit_cmd(
+    agent: str = typer.Argument(..., help=f"Agent name ({', '.join(AGENTS)}) or 'all'."),
+) -> None:
+    """Remove relic instructions and MCP registration from an agent config.
+
+    Reverses `relic --init <agent>`. Removes the relic block from CLAUDE.md /
+    .cursorrules / etc. and deletes the relic entry from .mcp.json / .cursor/mcp.json.
+    Run this if relic index warns that your codebase is too small to benefit.
+    """
+    if agent != "all" and agent not in AGENTS:
+        console.print(style.error(f"unknown agent: '{agent}' — choose from {', '.join(AGENTS)} or 'all'"))
+        raise SystemExit(1)
+    targets = list(AGENTS.keys()) if agent == "all" else [agent]
+    for key in targets:
+        uninit_agent(key, PROJECT_ROOT)
+
+
+@app.command(name="uninstall")
+def uninstall_cmd(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Fully remove relic from this project and uninstall the package.
+
+    Removes: agent instructions (CLAUDE.md etc.), MCP registrations (.mcp.json etc.),
+    and the .knowledge/ index directory. Then uninstalls relic-graph via pip or uv.
+    """
+    import shutil as _shutil
+
+    console.print(style.header("uninstall"))
+    console.print()
+    console.print(style.dim("   this will remove:"))
+    console.print(style.dim("     • relic block from CLAUDE.md / .cursorrules / AGENTS.md"))
+    console.print(style.dim("     • relic entry from .mcp.json / .cursor/mcp.json / .vscode/mcp.json"))
+    console.print(style.dim(f"     • {KNOWLEDGE_DIR} (index files)"))
+    console.print(style.dim("     • relic-graph package (pip / uv)"))
+    console.print()
+
+    if not yes:
+        confirm = typer.confirm("continue?", default=False)
+        if not confirm:
+            console.print(style.dim("   aborted"))
+            return
+
+    # Remove agent configs
+    for key in AGENTS:
+        uninit_agent(key, PROJECT_ROOT)
+
+    # Remove .knowledge/
+    if KNOWLEDGE_DIR.exists():
+        _shutil.rmtree(KNOWLEDGE_DIR)
+        console.print(style.success(f"removed   {style.dim(str(KNOWLEDGE_DIR))}"))
+    else:
+        console.print(style.dim(f"   skip    {KNOWLEDGE_DIR} (not found)"))
+
+    console.print()
+
+    # Uninstall package
+    pip_result = subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "-y", "relic-graph"],
+        capture_output=True,
+        text=True,
+    )
+    if pip_result.returncode == 0:
+        console.print(style.success("uninstalled relic-graph via pip"))
+        return
+
+    uv_result = subprocess.run(
+        ["uv", "tool", "uninstall", "relic-graph"],
+        capture_output=True,
+        text=True,
+    )
+    if uv_result.returncode == 0:
+        console.print(style.success("uninstalled relic-graph via uv"))
+        return
+
+    console.print(style.warn("could not uninstall package automatically — run: pip uninstall relic-graph"))
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,

@@ -14,7 +14,7 @@ import typer
 import yaml
 
 from relic import __version__, style
-from relic.agent_config import AGENTS, init_agent, init_all_agents
+from relic.agent_config import AGENTS, init_agent, init_all_agents, uninit_agent
 from relic.audit import compute_audit, compute_usage_audit, render_audit, render_usage_audit
 from relic.benchmark import run_benchmark
 from relic.coverage import compute_coverage, render_coverage
@@ -189,6 +189,16 @@ def index_cmd() -> None:
     console.print(style.success(f"saved   {style.dim(str(KNOWLEDGE_DIR / 'index.pkl'))}"))
     console.print(style.success(f"toon    {style.dim(str(toon_path))}"))
 
+    fit = G.graph.get("codebase_fit", {})
+    if fit.get("verdict") == "small":
+        console.print()
+        console.print(
+            style.warn(
+                f"small codebase ({fit['files']} files) — relic adds most value above ~40 files. "
+                f"Direct file reads may be faster here. Run `relic --uninit claude` to disable MCP."
+            )
+        )
+
 
 @app.command(name="query")
 def query_cmd(
@@ -351,15 +361,23 @@ def audit_cmd(
 
 @app.command(name="benchmark")
 def benchmark_cmd(
-    target: str = typer.Argument(..., help="File path to benchmark.", metavar="FILE"),
+    target: str = typer.Argument(..., help="File path or symbol name.", metavar="TARGET"),
     depth: int = typer.Option(1, "--depth", "-d", help="Graph traversal depth (default 1)."),
+    vs: Optional[str] = typer.Option(None, "--vs", help="Compare against a tool: 'ripgrep' or 'rg'."),
 ) -> None:
     """Compare token cost of agent context with vs without relic.
 
     Shows files an agent would read manually, tokens saved by TOON injection,
     and hidden callers it would miss entirely. Run this to prove relic's value.
+
+    Use --vs ripgrep to compare relic against a ripgrep search for the same symbol.
     """
-    run_benchmark(target, PROJECT_ROOT, KNOWLEDGE_DIR, depth=depth)
+    from relic.benchmark import run_rg_benchmark
+
+    if vs and vs.lower() in {"ripgrep", "rg"}:
+        run_rg_benchmark(target, PROJECT_ROOT, KNOWLEDGE_DIR)
+    else:
+        run_benchmark(target, PROJECT_ROOT, KNOWLEDGE_DIR, depth=depth)
 
 
 @app.command(name="diff")
@@ -564,6 +582,12 @@ def main(
         help=(f"Write relic instructions into agent config file. Pass agent name ({', '.join(AGENTS)}) or 'all'."),
         metavar="AGENT",
     ),
+    uninit: Optional[str] = typer.Option(
+        None,
+        "--uninit",
+        help=(f"Remove relic instructions and MCP registration. Pass agent name ({', '.join(AGENTS)}) or 'all'."),
+        metavar="AGENT",
+    ),
     update: bool = typer.Option(False, "--update", "-u", help="Upgrade to the latest version from PyPI."),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
@@ -580,6 +604,15 @@ def main(
         else:
             console.print(style.error(f"unknown agent: '{init}' — choose from {', '.join(AGENTS)} or 'all'"))
             raise SystemExit(1)
+        return
+
+    if uninit is not None:
+        targets = list(AGENTS.keys()) if uninit == "all" else [uninit]
+        if uninit != "all" and uninit not in AGENTS:
+            console.print(style.error(f"unknown agent: '{uninit}' — choose from {', '.join(AGENTS)} or 'all'"))
+            raise SystemExit(1)
+        for key in targets:
+            uninit_agent(key, PROJECT_ROOT)
         return
 
     if update:

@@ -10,6 +10,8 @@ code, accurate to ±15%). No API calls — entirely local.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 from pathlib import Path
 
@@ -193,4 +195,170 @@ def run_benchmark(target: str, project_root: Path, knowledge_dir: Path, depth: i
     summary.add_row("Query time", f"[dim]{relic_query_ms:.1f}ms[/dim]")
     summary.add_row("Token estimate", "[dim]~4 chars/token (standard code estimate)[/dim]")
     console.print(summary)
+    console.print()
+
+
+def run_rg_benchmark(symbol: str, project_root: Path, knowledge_dir: Path) -> None:
+    """Compare relic_query vs ripgrep for finding a symbol and understanding its context."""
+    if not shutil.which("rg"):
+        console.print(
+            "[bold red]Error:[/bold red] ripgrep (rg) not found. Install: https://github.com/BurntSushi/ripgrep"
+        )
+        raise SystemExit(1)
+
+    try:
+        G = load_graph(knowledge_dir)
+    except FileNotFoundError:
+        console.print("[bold red]Error:[/bold red] No index found. Run `relic index` first.")
+        raise SystemExit(1)
+
+    console.print()
+    console.print(Rule(f"[bold]relic vs ripgrep[/bold] — {symbol}", style="cyan"))
+    console.print()
+
+    # ── ripgrep ──────────────────────────────────────────────────────────────
+    t0 = time.perf_counter()
+    rg_result = subprocess.run(
+        ["rg", "--line-number", "--no-heading", symbol, str(project_root)],
+        capture_output=True,
+        text=True,
+    )
+    rg_ms = (time.perf_counter() - t0) * 1000
+    rg_output = rg_result.stdout.strip()
+    rg_lines = rg_output.splitlines() if rg_output else []
+
+    # Files rg found + token cost of rg output itself
+    rg_hit_files: set[str] = set()
+    for line in rg_lines:
+        parts = line.split(":", 1)
+        if parts:
+            try:
+                rel = str(Path(parts[0]).relative_to(project_root))
+                rg_hit_files.add(rel)
+            except ValueError:
+                rg_hit_files.add(parts[0])
+
+    rg_output_tokens = _tokens(rg_output)
+    # Agent would then read each hit file to understand context
+    rg_file_tokens = sum(_tokens(_read_file(project_root / f)) for f in rg_hit_files if (project_root / f).exists())
+    rg_total = rg_output_tokens + rg_file_tokens
+
+    console.print("[bold red]ripgrep[/bold red]  rg " + symbol)
+    console.print()
+    t_rg = Table(show_header=True, header_style="bold", show_lines=False, box=None, padding=(0, 2))
+    t_rg.add_column("What you get")
+    t_rg.add_column("Detail", style="dim")
+    t_rg.add_column("~Tokens", justify="right", style="yellow")
+    t_rg.add_row(
+        "rg output (file:line hits)",
+        f"{len(rg_lines)} matches in {len(rg_hit_files)} files",
+        f"{rg_output_tokens:,}",
+    )
+    t_rg.add_row("read hit files to understand", f"{len(rg_hit_files)} files", f"{rg_file_tokens:,}")
+    t_rg.add_row("[bold]Total[/bold]", "", f"[bold yellow]{rg_total:,}[/bold yellow]")
+    console.print(t_rg)
+    console.print()
+    console.print("[bold red]Still unknown[/bold red] after ripgrep:")
+    console.print("  [red]✗[/red] which files import this symbol (callers)")
+    console.print("  [red]✗[/red] full function signatures and types")
+    console.print("  [red]✗[/red] transitive blast-radius if it changes")
+    console.print("  [red]✗[/red] community / architectural context")
+    console.print()
+
+    # ── relic ────────────────────────────────────────────────────────────────
+    from relic.search import search_graph
+    from relic.toon import subgraph_to_toon
+
+    t1 = time.perf_counter()
+    _, sym_matches, _ = search_graph(G, symbol, kind="symbol")
+    node_id = sym_matches[0]["path"] if sym_matches else None
+
+    # Fall back to file search
+    if node_id is None:
+        file_matches, _, _ = search_graph(G, symbol, kind="file")
+        node_id = file_matches[0]["path"] if file_matches else None
+
+    relic_ms = (time.perf_counter() - t1) * 1000
+
+    if node_id is None:
+        console.print(f"[yellow]relic: '{symbol}' not in index — run `relic index` or check spelling[/yellow]")
+        return
+
+    neighbours = {node_id}
+    frontier = {node_id}
+    for _ in range(1):
+        nf: set[str] = set()
+        for n in frontier:
+            nf.update(G.predecessors(n))
+            nf.update(G.successors(n))
+        nf -= neighbours
+        neighbours.update(nf)
+        frontier = nf
+
+    sg = G.subgraph(neighbours)
+    file_nodes = [d for _, d in sg.nodes(data=True) if d.get("ntype") == "file"]
+    symbol_nodes = [d for _, d in sg.nodes(data=True) if d.get("ntype") == "symbol"]
+    import_edges = [(u, v) for u, v, d in sg.edges(data=True) if d.get("etype") == "imports"]
+    define_edges = [(u, v) for u, v, d in sg.edges(data=True) if d.get("etype") == "defines"]
+    extends_edges = [(u, v) for u, v, d in sg.edges(data=True) if d.get("etype") == "extends"]
+    imported_by_edges = [u for u, v in import_edges if v == node_id]
+
+    toon = subgraph_to_toon(
+        focus_path=node_id,
+        file_nodes=file_nodes,
+        symbol_nodes=symbol_nodes,
+        import_edges=import_edges,
+        define_edges=define_edges,
+        extends_edges=extends_edges,
+    )
+    focus_tokens = _tokens(_read_file(project_root / node_id)) if (project_root / node_id).exists() else 0
+    toon_tokens = _tokens(toon)
+    relic_total = toon_tokens + focus_tokens
+
+    console.print("[bold green]relic[/bold green]  relic_query " + symbol)
+    console.print()
+    t_rel = Table(show_header=True, header_style="bold", show_lines=False, box=None, padding=(0, 2))
+    t_rel.add_column("What you get")
+    t_rel.add_column("Detail", style="dim")
+    t_rel.add_column("~Tokens", justify="right", style="green")
+    t_rel.add_row(
+        "TOON context (auto-injected)",
+        f"{len(file_nodes)} files, {len(symbol_nodes)} symbols, callers",
+        f"{toon_tokens:,}",
+    )
+    t_rel.add_row("Focus file read", node_id, f"{focus_tokens:,}")
+    t_rel.add_row("[bold]Total[/bold]", "", f"[bold green]{relic_total:,}[/bold green]")
+    console.print(t_rel)
+    console.print()
+    console.print("[bold green]Exclusively known from relic (zero extra reads):[/bold green]")
+    if imported_by_edges:
+        for f in imported_by_edges[:5]:
+            console.print(f"  [green]✓[/green] [dim]{f}[/dim] imports this — would break if changed")
+    else:
+        console.print("  [green]✓[/green] full import graph, signatures, decorators, intent")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    savings = rg_total - relic_total
+    pct = round(savings / rg_total * 100) if rg_total else 0
+
+    console.print()
+    console.print(Rule(style="dim"))
+    fit = G.graph.get("codebase_fit", {})
+    verdict = fit.get("verdict", "unknown")
+
+    s = Table(show_header=False, show_lines=False, box=None, padding=(0, 2))
+    s.add_column("Metric", style="bold")
+    s.add_column("Value")
+    color = "green" if savings > 0 else "yellow"
+    s.add_row("Token difference", f"[{color}]{savings:+,} tokens ({pct:+}% vs ripgrep)[/{color}]")
+    s.add_row("rg time", f"[dim]{rg_ms:.1f}ms[/dim]")
+    s.add_row("relic time", f"[dim]{relic_ms:.1f}ms[/dim]")
+    s.add_row("codebase size", f"[dim]{verdict} ({fit.get('files', '?')} files)[/dim]")
+    if verdict == "small":
+        s.add_row("verdict", "[yellow]small codebase — ripgrep may be sufficient here[/yellow]")
+    elif savings > 0:
+        s.add_row("verdict", "[green]relic saves tokens AND surfaces hidden callers[/green]")
+    else:
+        s.add_row("verdict", "[yellow]similar token cost — relic adds caller graph, rg adds line numbers[/yellow]")
+    console.print(s)
     console.print()

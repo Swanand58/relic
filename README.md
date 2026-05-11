@@ -35,6 +35,16 @@ Relic also measures its own cost. `relic audit` shows exactly what relic adds to
 
 ---
 
+## When to use relic
+
+Relic pays off when your codebase is too large for an agent to hold in context at once — roughly **40+ files or 80k+ tokens**. Below that threshold, an agent can read files directly and relic adds friction without much payoff.
+
+`relic index` detects this automatically and warns you if your codebase is small. If it does, run `relic --uninit claude` to remove the MCP registration and let the agent work directly. You can always re-enable with `relic --init claude`.
+
+`relic benchmark <file> --vs ripgrep` shows the exact token difference on your actual codebase, so you can decide with data rather than guessing.
+
+---
+
 ## How it works
 
 ```
@@ -322,11 +332,14 @@ relic coverage -v                  # list every skipped file (not just samples)
 relic audit                        # measure relic's own token footprint
 relic audit --usage                # show per-tool MCP call counts
 relic benchmark <file>             # compare token cost of context with vs without relic
+relic benchmark <symbol> --vs ripgrep  # compare relic vs ripgrep for a symbol search
 relic mcp                          # start MCP stdio server (4 tools)
 
 relic --list                       # list subprojects (if relic.yaml exists)
 relic --init <agent>               # write agent config + MCP registration
 relic --init all                   # write config for all supported agents
+relic --uninit <agent>             # remove relic MCP registration + instructions
+relic --uninit all                 # remove for all agents
 relic --update                     # install latest GitHub release
 relic --version                    # print version
 ```

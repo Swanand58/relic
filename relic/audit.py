@@ -24,11 +24,7 @@ import json
 from pathlib import Path
 
 from relic import style
-from relic.agent_config import (
-    RELIC_EXAMPLE_PLACEHOLDER,
-    RELIC_INSTRUCTIONS,
-    _pick_example_file,
-)
+from relic.agent_config import RELIC_INSTRUCTIONS
 from relic.benchmark import _read_file, _tokens
 from relic.indexer import load_graph
 from relic.mcp_server import list_tools
@@ -81,27 +77,10 @@ def _mcp_tool_tokens() -> tuple[int, list[dict]]:
     return total, breakdown
 
 
-def _sample_query(project_root: Path, knowledge_dir: Path) -> dict | None:
-    """Run a representative `relic_query` against the user's actual graph.
-
-    Picks the same file `relic --init` would picks for its example
-    (most-connected non-barrel) so the audit reflects what an agent would
-    actually see on this project. Returns None when no index exists yet —
-    the user will be told to run `relic index` first.
-    """
-    try:
-        G = load_graph(knowledge_dir)
-    except FileNotFoundError:
-        return None
-
-    sample_path = _pick_example_file(project_root)
-    if sample_path == RELIC_EXAMPLE_PLACEHOLDER or sample_path not in G.nodes:
-        # The placeholder helper falls back to "src/<your-file>" when the
-        # graph is empty. Audit needs a real node — bail.
-        return None
-
-    neighbours = {sample_path}
-    frontier = {sample_path}
+def _query_one(G, project_root: Path, node_id: str) -> dict | None:
+    """Compute relic vs manual token cost for a single file node."""
+    neighbours = {node_id}
+    frontier = {node_id}
     for _ in range(SAMPLE_DEPTH):
         nf: set[str] = set()
         for n in frontier:
@@ -119,7 +98,7 @@ def _sample_query(project_root: Path, knowledge_dir: Path) -> dict | None:
     extends_edges = [(u, v) for u, v, d in sg.edges(data=True) if d.get("etype") == "extends"]
 
     toon = subgraph_to_toon(
-        focus_path=sample_path,
+        focus_path=node_id,
         file_nodes=file_nodes,
         symbol_nodes=symbol_nodes,
         import_edges=import_edges,
@@ -127,8 +106,8 @@ def _sample_query(project_root: Path, knowledge_dir: Path) -> dict | None:
         extends_edges=extends_edges,
     )
 
-    direct_imports = [v for u, v in import_edges if u == sample_path]
-    focus_content = _read_file(project_root / sample_path)
+    direct_imports = [v for u, v in import_edges if u == node_id]
+    focus_content = _read_file(project_root / node_id)
     focus_tokens = _tokens(focus_content)
     manual_total = focus_tokens
     for imp in direct_imports:
@@ -139,8 +118,7 @@ def _sample_query(project_root: Path, knowledge_dir: Path) -> dict | None:
     savings = manual_total - with_relic
 
     return {
-        "sample_path": sample_path,
-        "depth": SAMPLE_DEPTH,
+        "path": node_id,
         "toon_tokens": toon_tokens,
         "focus_tokens": focus_tokens,
         "with_relic_tokens": with_relic,
@@ -148,6 +126,59 @@ def _sample_query(project_root: Path, knowledge_dir: Path) -> dict | None:
         "savings": savings,
         "savings_pct": round(savings / manual_total * 100) if manual_total else 0,
         "files_replaced": len(direct_imports),
+    }
+
+
+def _sample_query(project_root: Path, knowledge_dir: Path, n_samples: int = 5) -> dict | None:
+    """Sample top-N files by import count, compute avg savings across all of them."""
+    try:
+        G = load_graph(knowledge_dir)
+    except FileNotFoundError:
+        return None
+
+    file_nodes = [n for n, d in G.nodes(data=True) if d.get("ntype") == "file" and (project_root / n).exists()]
+    if not file_nodes:
+        return None
+
+    # Pick top files by in-degree (most depended-upon) — most representative for agents
+    by_indegree = sorted(file_nodes, key=lambda n: G.in_degree(n), reverse=True)
+    # Spread sample: take top third, middle third, bottom — avoid all-barrel bias
+    total = len(by_indegree)
+    candidates: list[str] = []
+    step = max(1, total // (n_samples * 2))
+    seen: set[str] = set()
+    for i in range(0, total, step):
+        if len(candidates) >= n_samples:
+            break
+        node = by_indegree[i]
+        if node not in seen:
+            candidates.append(node)
+            seen.add(node)
+
+    results = [r for c in candidates if (r := _query_one(G, project_root, c)) is not None]
+    if not results:
+        return None
+
+    total_manual = sum(r["manual_baseline"] for r in results)
+    total_with_relic = sum(r["with_relic_tokens"] for r in results)
+    total_savings = total_manual - total_with_relic
+
+    return {
+        "depth": SAMPLE_DEPTH,
+        "samples": results,
+        "n_samples": len(results),
+        "total_manual": total_manual,
+        "total_with_relic": total_with_relic,
+        "total_savings": total_savings,
+        "savings_pct": round(total_savings / total_manual * 100) if total_manual else 0,
+        # keep compat fields for render_audit
+        "sample_path": results[0]["path"],
+        "toon_tokens": results[0]["toon_tokens"],
+        "focus_tokens": results[0]["focus_tokens"],
+        "with_relic_tokens": total_with_relic,
+        "manual_baseline": total_manual,
+        "savings": total_savings,
+        "files_replaced": sum(r["files_replaced"] for r in results),
     }
 
 
@@ -216,27 +247,44 @@ def render_audit(audit: dict, console) -> None:
 
     sample = audit["sample_query"]
     if sample is not None:
+        n = sample.get("n_samples", 1)
         console.print()
-        console.print(style.dim(f"   sample query  ·  {sample['sample_path']}  ·  depth={sample['depth']}"))
+        console.print(style.dim(f"   sample queries  ·  {n} files  ·  depth={sample['depth']}"))
         console.print()
+
+        for r in sample.get("samples", []):
+            pct = r["savings_pct"]
+            sign = "+" if pct >= 0 else ""
+            color = "green" if pct > 0 else "red"
+            console.print(
+                f"   [{style.DIM}]{r['path']:<45}[/]  "
+                f"manual ~{r['manual_baseline']:>5,}  relic ~{r['with_relic_tokens']:>5,}  "
+                f"[{color}]{sign}{pct}%[/]"
+            )
+
+        console.print()
+        console.print(f"   [{style.DIM}]{'─' * (kw + 30)}[/]")
         console.print(
             style.kv(
-                "relic_query response",
-                f"~{sample['with_relic_tokens']:,} tokens",
+                "total manual baseline",
+                f"~{sample['total_manual']:,} tokens  ({n} files)",
                 key_width=kw,
             )
         )
         console.print(
             style.kv(
-                "manual baseline",
-                f"~{sample['manual_baseline']:,} tokens",
+                "total with relic",
+                f"~{sample['total_with_relic']:,} tokens",
                 key_width=kw,
             )
         )
+        pct = sample["savings_pct"]
+        sign = "+" if pct >= 0 else ""
+        color = "green" if pct > 0 else "red"
         console.print(
             style.kv(
                 "net savings",
-                f"~{sample['savings']:,} tokens ({sample['savings_pct']}%)",
+                f"[{color}]~{sample['total_savings']:,} tokens ({sign}{pct}%)[/]",
                 key_width=kw,
             )
         )

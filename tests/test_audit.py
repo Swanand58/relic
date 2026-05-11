@@ -108,9 +108,9 @@ class TestRenderAudit:
 
     def test_renders_sample_query_when_indexed(self, tmp_project: Path):
         out = self._capture(tmp_project, tmp_project / ".knowledge")
-        assert "sample query" in out
-        assert "relic_query response" in out
+        assert "sample quer" in out
         assert "manual baseline" in out
+        assert "net savings" in out
         assert "net savings" in out
 
     def test_renders_healthy_verdict(self, tmp_path: Path):
